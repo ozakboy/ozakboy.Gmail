@@ -37,10 +37,9 @@ Label it, trash it, or reply:
 await gmail.BatchModifyLabelsAsync(adIds, addLabelIds: new[] { adsLabelId }, removeLabelIds: null);
 await gmail.TrashAsync(messageId);                       // recoverable for 30 days — there is no permanent delete here
 
-var reply = new MimeMessage { Subject = "Re: Quotation" };
-reply.To.Add(new MailboxAddress("Customer", "customer@example.com"));
-reply.InReplyTo = originalMessageId;
-reply.Body = new TextPart("html") { Text = "<p>Attached.</p>" };
+var reply = new GmailOutgoingMessage { Subject = "Re: Quotation", HtmlBody = "<p>Attached.</p>", InReplyTo = originalMessageId };
+reply.To.Add(new GmailAddress("customer@example.com", "Customer"));
+reply.Attachments.Add(new GmailAttachmentContent { FileName = "quote.pdf", ContentType = "application/pdf", Content = pdfBytes });
 
 GmailMessage sent = await gmail.SendAsync(reply, threadId: originalThreadId);
 ```
@@ -80,7 +79,7 @@ GoogleTokenResponse fresh = await oauth.RefreshAsync(refreshToken);
 
 A deliberately thin layer over two Google HTTP APIs:
 
-- **`GmailClient`** — profile, list / get messages (metadata, full or raw as a MimeKit `MimeMessage`), `history.list` for incremental sync, modify / batch-modify labels, trash / untrash, report spam, labels CRUD, attachments, and `messages.send`
+- **`GmailClient`** — profile, list / get messages (metadata, full, or the raw RFC 822 bytes), `history.list` for incremental sync, modify / batch-modify labels, trash / untrash, report spam, labels CRUD, attachments, and `messages.send` — with a built-in RFC 822 writer (`GmailOutgoingMessage`) or your own bytes (`SendRawAsync`)
 - **`GoogleOAuthClient`** — authorization URL, code exchange, refresh, revoke, and reading the `id_token` claims
 - **`GmailApiException`** — every non-2xx response, with Google's error reason and four flags a sync loop needs: `IsUnauthorized`, `IsHistoryExpired`, `IsRateLimited`, `IsNotFound`
 
@@ -90,9 +89,11 @@ And what it is **not**: it does not store or encrypt tokens, does not watch Pub/
 
 **No `Google.Apis`, no opinions about tokens.** The client asks a `Func<CancellationToken, Task<string>>` for an access token before each request and never sees a refresh token. Encrypt them with your own key, scope them per tenant, rotate them on your schedule — the library has no cache to fight.
 
-**`gmail.modify` is the only scope you need.** Sending goes through REST `messages.send` (MimeKit builds the `MimeMessage`, the client uploads it as `message/rfc822`), not SMTP. SMTP and IMAP with OAuth require the full `https://mail.google.com/` scope; this library never asks for it.
+**`gmail.modify` is the only scope you need.** Sending goes through REST `messages.send` (the built-in writer produces the RFC 822 message, the client uploads it as `message/rfc822`), not SMTP. SMTP and IMAP with OAuth require the full `https://mail.google.com/` scope; this library never asks for it.
 
 **Errors you can branch on.** Gmail's per-user quota comes back as HTTP 403, an expired `startHistoryId` as 404, a dead refresh token as 400 `invalid_grant`. You do not parse any of that: 429, 5xx and the rate-limit 403s are retried with exponential backoff (three times from one second, `Retry-After` honoured), and what still fails arrives as one exception type with the right flag set.
+
+**No MIME library either.** Since 2.0.0 the package depends on nothing beyond the two `Microsoft.Extensions.Configuration` binding packages (and `System.Text.Json` on .NET Standard). `GmailOutgoingMessage` writes text + HTML bodies, attachments, `Reply-To`, `Bcc`, threading and custom headers itself; anything fancier, build with MimeKit in your own project and call `SendRawAsync`.
 
 **Async all the way down.** No synchronous API, `ConfigureAwait(false)` on every await, `OperationCanceledException` never wrapped, models are plain classes with the Gmail REST field names.
 
@@ -118,7 +119,7 @@ Then follow [Getting Started](docs/en/getting-started.md) — it walks through t
 
 .NET Standard 2.0 covers .NET Framework 4.6.1+, .NET Core 2.0+ and Mono/Xamarin/Unity.
 
-Dependencies: `MimeKit`, `Microsoft.Extensions.Configuration.Abstractions`, `Microsoft.Extensions.Configuration.Binder`, and `System.Text.Json` on .NET Standard only.
+Dependencies: `Microsoft.Extensions.Configuration.Abstractions`, `Microsoft.Extensions.Configuration.Binder`, and `System.Text.Json` on .NET Standard only. No MIME library since 2.0.0 — see the [migration guide](docs/en/migration.md) if you are upgrading from 1.0.0.
 
 ## Documentation
 
@@ -127,6 +128,7 @@ Dependencies: `MimeKit`, `Microsoft.Extensions.Configuration.Abstractions`, `Mic
 | [Getting Started](docs/en/getting-started.md) | Google Cloud setup, OAuth flow, token provider, first sync |
 | [Configuration](docs/en/configuration.md) | `GoogleOAuthOptions`, `GoogleAuthorizationUrlOptions`, `GmailClientOptions`, the refresh-token gotchas |
 | [API Reference](docs/en/api.md) | Every public member, parameter, exception flag and null rule |
+| [Migration](docs/en/migration.md) | 1.0.0 → 2.0.0 |
 | [Changelog](docs/en/changelog.md) | Version history |
 
 ## License

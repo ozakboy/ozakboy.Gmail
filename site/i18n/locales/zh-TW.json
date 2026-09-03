@@ -5,6 +5,7 @@
   "nav": {
     "docs": "文件",
     "changelog": "更新紀錄",
+    "migration": "升級指南",
     "sponsor": "贊助"
   },
   "home": {
@@ -24,7 +25,7 @@
         },
         "oneScope": {
           "title": "寄信只要一個 scope",
-          "desc": "寄信走 REST 的 messages.send:用 MimeKit 組好 MimeMessage 再以 multipart 上傳。所以 gmail.modify 一個權限就夠,不必為了 SMTP / IMAP 去要 mail.google.com 的完整權限。"
+          "desc": "寄信走 REST 的 messages.send:內建組信器寫出 RFC 822 信件,再以 multipart 上傳,不靠 MimeKit。所以 gmail.modify 一個權限就夠,不必為了 SMTP / IMAP 去要 mail.google.com 的完整權限。"
         },
         "errors": {
           "title": "錯誤不用自己解 JSON",
@@ -36,7 +37,7 @@
         },
         "targets": {
           "title": "五個目標框架",
-          "desc": "netstandard2.0 / 2.1 與 net8.0 / 9.0 / 10.0 都支援;netstandard2.0 也涵蓋 .NET Framework 4.6.1+。相依只有 MimeKit、設定繫結那兩個 Microsoft.Extensions 套件,netstandard 再加 System.Text.Json。"
+          "desc": "netstandard2.0 / 2.1 與 net8.0 / 9.0 / 10.0 都支援;netstandard2.0 也涵蓋 .NET Framework 4.6.1+。相依只有設定繫結那兩個 Microsoft.Extensions 套件,netstandard 再加 System.Text.Json;2.0.0 起沒有 MIME 函式庫。"
         },
         "narrow": {
           "title": "刻意做窄",
@@ -58,7 +59,8 @@
       "gettingStarted": "快速上手",
       "configuration": "設定說明",
       "api": "API 文件",
-      "changelog": "更新紀錄"
+      "changelog": "更新紀錄",
+      "migration": "升級指南"
     }
   },
   "sponsor": {

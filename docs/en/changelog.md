@@ -10,6 +10,29 @@ Version numbers follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.0.0] - 2026-09-03
+
+> **MimeKit is no longer a dependency.** Outgoing mail is composed by a built-in RFC 822 writer or handed over as raw bytes; raw messages come back as bytes. **Breaking**: two signatures changed — see the [migration guide](./migration.md). Everything else is identical to 1.0.0.
+
+### Added
+
+- **`GmailOutgoingMessage`** — a small outgoing-mail model (`From`, `To`, `Cc`, `Bcc`, `ReplyTo`, `Subject`, `TextBody`, `HtmlBody`, `Attachments`, `InReplyTo`, `References`, extra `Headers`) with `ToRfc822Bytes()`: a built-in RFC 822 / MIME writer — UTF-8, base64 bodies and attachments, RFC 2047 encoded headers, `multipart/alternative` for text + HTML, `multipart/mixed` for attachments.
+- **`GmailAddress`** (address + optional display name, validated) and **`GmailAttachmentContent`** (`FileName`, `ContentType`, `byte[] Content`) as the building blocks of `GmailOutgoingMessage`.
+- **`SendRawAsync(byte[] rfc822, threadId)`** — send a message composed by any MIME library of your choice; the bytes are uploaded verbatim.
+- **`GmailMessage.DecodeRaw()`** — the base64url-decoded RFC 822 bytes of a message fetched with `GmailMessageFormat.Raw`.
+
+### Changed (breaking)
+
+- **`SendAsync(MimeMessage, threadId)` → `SendAsync(GmailOutgoingMessage, threadId)`.** Build the message with `GmailOutgoingMessage`, or keep MimeKit in your own project and call `SendRawAsync` with the serialised bytes.
+- **`GetMessageRawAsync(id)` now returns `Task<byte[]>`** instead of `Task<MimeMessage>`. Parse with any MIME library, or use `GetMessageAsync(id, GmailMessageFormat.Full)`, which Gmail has already split into parts.
+- **The package no longer references `MimeKit`.** Projects that used MimeKit types through the transitive reference must add the package themselves.
+
+### Technical
+
+- The RFC 822 writer is verified in the test project by parsing its output with MimeKit (test-only dependency): addresses and display names, non-ASCII subjects and file names round-trip, `multipart/alternative` + `multipart/mixed` structure, attachment bytes, header folding and line-length limits.
+
+---
+
 ## [1.0.0] - 2026-09-03
 
 > First release. A thin, async-only client for the Gmail REST API and the Google OAuth 2.0 token endpoints — no `Google.Apis` dependency, no token storage, no SMTP. Sending goes through `messages.send`, so the single `gmail.modify` scope is enough.

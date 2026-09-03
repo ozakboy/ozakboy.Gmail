@@ -28,7 +28,7 @@ export default defineNuxtConfig({
         {
           name: 'keywords',
           content:
-            'Ozakboy.Gmail, Gmail API, .NET Gmail client, csharp gmail, Google OAuth, gmail.modify, messages.send, MimeKit, dotnet, NuGet',
+            'Ozakboy.Gmail, Gmail API, .NET Gmail client, csharp gmail, Google OAuth, gmail.modify, messages.send, RFC 822, dotnet, NuGet',
         },
         { name: 'author', content: 'ozakboy' },
 

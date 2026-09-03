@@ -1,6 +1,6 @@
 ---
 title: Configuration
-description: Every option of Ozakboy.Gmail 1.0.0 — GoogleOAuthOptions, GoogleAuthorizationUrlOptions, GmailClientOptions — plus the Google-side settings and gotchas.
+description: Every option of Ozakboy.Gmail 2.0.0 — GoogleOAuthOptions, GoogleAuthorizationUrlOptions, GmailClientOptions — plus the Google-side settings and gotchas.
 ---
 
 # Configuration

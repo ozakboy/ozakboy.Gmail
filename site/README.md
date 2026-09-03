@@ -59,7 +59,7 @@ site/
 - 英文:`/en/`
 - 切換:layout header 右側 LanguageSwitcher
 - 內容檔案:`docs/{en,zh-TW}/*.md` ←(同步)→ `site/content/{en,zh-TW}/*.md`
-- 目前同步的文件:`getting-started`、`configuration`、`api`、`changelog`
+- 目前同步的文件:`getting-started`、`configuration`、`api`、`changelog`、`migration`
 
 ## GitHub Pages 設定提醒
 

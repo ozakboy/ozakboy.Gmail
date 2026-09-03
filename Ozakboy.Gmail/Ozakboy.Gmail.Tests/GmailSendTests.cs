@@ -1,25 +1,27 @@
 using System;
+using System.Text;
 using System.Threading.Tasks;
-using MimeKit;
 using Ozakboy.Gmail.Tests.TestSupport;
 using Xunit;
 
 namespace Ozakboy.Gmail.Tests
 {
     /// <summary>
-    /// 寄信(messages.send 多段上傳)的組裝與回應解析測試。
+    /// 寄信(messages.send 多段上傳)的組裝與回應解析測試:SendAsync 走內建組信器、SendRawAsync 走呼叫端 bytes。
     /// </summary>
     public class GmailSendTests
     {
         private const string SendUrl = "https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/send?uploadType=multipart";
 
-        private static MimeMessage CreateMessage(string subject = "測試主旨")
+        private static GmailOutgoingMessage CreateMessage(string subject = "測試主旨")
         {
-            var message = new MimeMessage();
-            message.From.Add(new MailboxAddress("寄件者", "sender@example.com"));
-            message.To.Add(new MailboxAddress("收件者", "receiver@example.com"));
-            message.Subject = subject;
-            message.Body = new TextPart("plain") { Text = "內文" };
+            var message = new GmailOutgoingMessage
+            {
+                From = new GmailAddress("sender@example.com", "寄件者"),
+                Subject = subject,
+                TextBody = "內文",
+            };
+            message.To.Add(new GmailAddress("receiver@example.com", "收件者"));
             return message;
         }
 
@@ -38,19 +40,25 @@ namespace Ozakboy.Gmail.Tests
         }
 
         [Fact]
-        public async Task SendAsync_主體含rfc822段與郵件原文()
+        public async Task SendAsync_主體含rfc822段且內容等於ToRfc822Bytes()
         {
             var handler = new RecordingHandler();
             handler.EnqueueJson("{\"id\":\"m1\"}");
             var client = GmailTestFactory.CreateClient(handler);
+            var message = CreateMessage();
 
-            await client.SendAsync(CreateMessage());
+            await client.SendAsync(message);
 
             var body = handler.LastRequest.Body;
             Assert.Contains("message/rfc822", body, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("application/json", body, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("To: ", body, StringComparison.Ordinal);
             Assert.Contains("sender@example.com", body, StringComparison.Ordinal);
+
+            // 組信器的輸出會原封不動出現在 rfc822 段裡(標頭段落一定含 MIME-Version)
+            var expected = Encoding.UTF8.GetString(message.ToRfc822Bytes());
+            var headersOnly = expected.Substring(0, expected.IndexOf("MIME-Version: 1.0", StringComparison.Ordinal));
+            Assert.Contains(headersOnly, body, StringComparison.Ordinal);
         }
 
         [Fact]
@@ -105,6 +113,34 @@ namespace Ozakboy.Gmail.Tests
             Assert.Equal(2, handler.RequestCount);
             Assert.Contains("message/rfc822", handler.Requests[0].Body, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("message/rfc822", handler.Requests[1].Body, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public async Task SendAsync_沒有收件人_送出前就拋InvalidOperationException()
+        {
+            var handler = new RecordingHandler();
+            var client = GmailTestFactory.CreateClient(handler);
+            var message = new GmailOutgoingMessage { Subject = "沒人收" };
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() => client.SendAsync(message));
+            Assert.Equal(0, handler.RequestCount);
+        }
+
+        [Fact]
+        public async Task SendRawAsync_原封不動上傳呼叫端給的位元組()
+        {
+            const string Rfc822 = "From: sender@example.com\r\nTo: receiver@example.com\r\nSubject: raw\r\n\r\nhello";
+            var handler = new RecordingHandler();
+            handler.EnqueueJson("{\"id\":\"m9\",\"threadId\":\"t9\"}");
+            var client = GmailTestFactory.CreateClient(handler);
+
+            var sent = await client.SendRawAsync(Encoding.UTF8.GetBytes(Rfc822), "t9");
+
+            Assert.Equal(SendUrl, handler.LastRequest.Url);
+            Assert.Contains("message/rfc822", handler.LastRequest.Body, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains(Rfc822, handler.LastRequest.Body, StringComparison.Ordinal);
+            Assert.Contains("{\"threadId\":\"t9\"}", handler.LastRequest.Body, StringComparison.Ordinal);
+            Assert.Equal("m9", sent.Id);
         }
     }
 }

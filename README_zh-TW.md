@@ -37,10 +37,9 @@ foreach (GmailMessageRef reference in page.Messages)
 await gmail.BatchModifyLabelsAsync(adIds, addLabelIds: new[] { adsLabelId }, removeLabelIds: null);
 await gmail.TrashAsync(messageId);                       // 30 天內可救——這裡沒有永久刪除
 
-var reply = new MimeMessage { Subject = "Re: 報價確認" };
-reply.To.Add(new MailboxAddress("客戶", "customer@example.com"));
-reply.InReplyTo = originalMessageId;
-reply.Body = new TextPart("html") { Text = "<p>附件如附。</p>" };
+var reply = new GmailOutgoingMessage { Subject = "Re: 報價確認", HtmlBody = "<p>附件如附。</p>", InReplyTo = originalMessageId };
+reply.To.Add(new GmailAddress("customer@example.com", "客戶"));
+reply.Attachments.Add(new GmailAttachmentContent { FileName = "報價單.pdf", ContentType = "application/pdf", Content = pdfBytes });
 
 GmailMessage sent = await gmail.SendAsync(reply, threadId: originalThreadId);
 ```
@@ -80,7 +79,7 @@ GoogleTokenResponse fresh = await oauth.RefreshAsync(refreshToken);
 
 刻意做薄的一層,包兩組 Google HTTP API:
 
-- **`GmailClient`**——profile、列出 / 讀取信件(metadata、full,或 raw 解析成 MimeKit `MimeMessage`)、`history.list` 增量同步、修改 / 批次修改標籤、垃圾桶進出、回報垃圾信、標籤 CRUD、附件、`messages.send`
+- **`GmailClient`**——profile、列出 / 讀取信件(metadata、full,或 RFC 822 原始 bytes)、`history.list` 增量同步、修改 / 批次修改標籤、垃圾桶進出、回報垃圾信、標籤 CRUD、附件、`messages.send`——內建 RFC 822 組信器(`GmailOutgoingMessage`)或自己給 bytes(`SendRawAsync`)
 - **`GoogleOAuthClient`**——授權網址、code 換 token、續期、撤銷、讀 `id_token` 的 claim
 - **`GmailApiException`**——所有非 2xx 回應,帶 Google 的錯誤 reason 與同步迴圈需要的四個旗標:`IsUnauthorized`、`IsHistoryExpired`、`IsRateLimited`、`IsNotFound`
 
@@ -90,9 +89,11 @@ GoogleTokenResponse fresh = await oauth.RefreshAsync(refreshToken);
 
 **沒有 `Google.Apis`,對 token 沒有意見。** client 在每個請求前向一個 `Func<CancellationToken, Task<string>>` 要 access token,從頭到尾看不到 refresh token。用你自己的金鑰加密、按租戶隔離、照你的節奏輪替——套件裡沒有一個快取會跟你打架。
 
-**只要 `gmail.modify` 一個 scope。** 寄信走 REST `messages.send`(MimeKit 組 `MimeMessage`,client 以 `message/rfc822` 上傳),不走 SMTP。SMTP 與 IMAP 配 OAuth 一律要 `https://mail.google.com/` 完整權限;本套件從不申請它。
+**只要 `gmail.modify` 一個 scope。** 寄信走 REST `messages.send`(內建組信器寫出 RFC 822 信件,client 以 `message/rfc822` 上傳),不走 SMTP。SMTP 與 IMAP 配 OAuth 一律要 `https://mail.google.com/` 完整權限;本套件從不申請它。
 
 **錯誤可以直接分支。** Gmail 的每使用者配額回 HTTP 403、`startHistoryId` 過期回 404、refresh token 死了回 400 `invalid_grant`。這些你都不用解析:429、5xx 與配額型 403 會先指數退避重試(1 秒起跳三次,尊重 `Retry-After`),還是失敗的以同一種例外型別、對的旗標交到你手上。
+
+**也沒有 MIME 函式庫。** 2.0.0 起套件只剩兩個 `Microsoft.Extensions.Configuration` 綁定套件(.NET Standard 另加 `System.Text.Json`)。`GmailOutgoingMessage` 自己寫出 text + HTML 內文、附件、`Reply-To`、`Bcc`、討論串與自訂標頭;更花俏的需求在自己專案用 MimeKit 組好、呼叫 `SendRawAsync`。
 
 **從頭到尾 async。** 沒有同步 API,每個 await 都 `ConfigureAwait(false)`,`OperationCanceledException` 絕不包裝,模型是對齊 Gmail REST 欄位名的 plain class。
 
@@ -118,7 +119,7 @@ dotnet add package Ozakboy.Gmail
 
 .NET Standard 2.0 涵蓋 .NET Framework 4.6.1+、.NET Core 2.0+ 與 Mono/Xamarin/Unity。
 
-相依:`MimeKit`、`Microsoft.Extensions.Configuration.Abstractions`、`Microsoft.Extensions.Configuration.Binder`,以及僅 .NET Standard 需要的 `System.Text.Json`。
+相依:`Microsoft.Extensions.Configuration.Abstractions`、`Microsoft.Extensions.Configuration.Binder`,以及僅 .NET Standard 需要的 `System.Text.Json`。2.0.0 起沒有 MIME 函式庫——從 1.0.0 升上來請看[升級指南](docs/zh-TW/migration.md)。
 
 ## 文件
 
@@ -127,6 +128,7 @@ dotnet add package Ozakboy.Gmail
 | [快速開始](docs/zh-TW/getting-started.md) | Google Cloud 設定、OAuth 流程、token 提供者、第一次同步 |
 | [設定](docs/zh-TW/configuration.md) | `GoogleOAuthOptions`、`GoogleAuthorizationUrlOptions`、`GmailClientOptions`、refresh token 的坑 |
 | [API 文件](docs/zh-TW/api.md) | 每個公開成員、參數、例外旗標與 null 規則 |
+| [升級指南](docs/zh-TW/migration.md) | 1.0.0 → 2.0.0 |
 | [版本紀錄](docs/zh-TW/changelog.md) | 版本歷史 |
 
 ## 授權

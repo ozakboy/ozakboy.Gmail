@@ -5,6 +5,7 @@
   "nav": {
     "docs": "Docs",
     "changelog": "Changelog",
+    "migration": "Migration",
     "sponsor": "Sponsor"
   },
   "home": {
@@ -24,7 +25,7 @@
         },
         "oneScope": {
           "title": "Sending needs one scope",
-          "desc": "Mail goes out through the REST messages.send endpoint: MimeKit builds the MimeMessage, the client uploads it as multipart. So gmail.modify on its own is enough — no need to ask for full mail.google.com access just to reach SMTP or IMAP."
+          "desc": "Mail goes out through the REST messages.send endpoint: the built-in RFC 822 writer composes the message (no MimeKit), the client uploads it as multipart. So gmail.modify on its own is enough — no need to ask for full mail.google.com access just to reach SMTP or IMAP."
         },
         "errors": {
           "title": "No parsing error JSON yourself",
@@ -36,7 +37,7 @@
         },
         "targets": {
           "title": "Five target frameworks",
-          "desc": "netstandard2.0 / 2.1 plus net8.0 / 9.0 / 10.0; netstandard2.0 covers .NET Framework 4.6.1+ as well. The only dependencies are MimeKit, the two Microsoft.Extensions.Configuration packages used for binding, and System.Text.Json on netstandard."
+          "desc": "netstandard2.0 / 2.1 plus net8.0 / 9.0 / 10.0; netstandard2.0 covers .NET Framework 4.6.1+ as well. The only dependencies are the two Microsoft.Extensions.Configuration packages used for binding and System.Text.Json on netstandard — no MIME library since 2.0.0."
         },
         "narrow": {
           "title": "Deliberately narrow",
@@ -58,7 +59,8 @@
       "gettingStarted": "Getting Started",
       "configuration": "Configuration",
       "api": "API Reference",
-      "changelog": "Changelog"
+      "changelog": "Changelog",
+      "migration": "Migration"
     }
   },
   "sponsor": {

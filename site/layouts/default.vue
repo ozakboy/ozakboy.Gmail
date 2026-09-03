@@ -22,6 +22,7 @@ const baseURL = config.app.baseURL || '/'
         <nav class="flex items-center gap-4 sm:gap-6 text-sm">
           <NuxtLink :to="localePath('/docs')" class="hover:text-brand-700">{{ $t('nav.docs') }}</NuxtLink>
           <NuxtLink :to="localePath('/docs/changelog')" class="hover:text-brand-700 hidden md:inline">{{ $t('nav.changelog') }}</NuxtLink>
+          <NuxtLink :to="localePath('/docs/migration')" class="hover:text-brand-700 hidden md:inline">{{ $t('nav.migration') }}</NuxtLink>
           <NuxtLink :to="localePath('/sponsor')" class="hover:text-brand-700">{{ $t('nav.sponsor') }}</NuxtLink>
           <a href="https://github.com/ozakboy/ozakboy.Gmail" target="_blank" rel="noopener" class="hover:text-brand-700">GitHub</a>
           <LanguageSwitcher />

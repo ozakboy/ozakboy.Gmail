@@ -1,6 +1,6 @@
 ---
 title: Getting Started
-description: Install Ozakboy.Gmail 1.0.0, connect a Gmail account with Google OAuth, and read your first messages.
+description: Install Ozakboy.Gmail 2.0.0, connect a Gmail account with Google OAuth, and read your first messages.
 ---
 
 # Getting Started
@@ -8,7 +8,7 @@ description: Install Ozakboy.Gmail 1.0.0, connect a Gmail account with Google OA
 ## Install
 
 ```bash
-dotnet add package Ozakboy.Gmail --version 1.0.0
+dotnet add package Ozakboy.Gmail --version 2.0.0
 ```
 
 Supported target frameworks: `netstandard2.0`, `netstandard2.1`, `net8.0`, `net9.0`, `net10.0`.
@@ -190,15 +190,30 @@ GmailLabel label = await gmail.CreateLabelAsync("Sower/Ads", cancellationToken: 
 await gmail.BatchModifyLabelsAsync(adIds, addLabelIds: new[] { label.Id! }, removeLabelIds: null, ct);
 await gmail.TrashAsync(messageId, ct);          // recoverable for 30 days; there is no permanent delete
 
-var reply = new MimeMessage();
-reply.From.Add(new MailboxAddress("Support", "support@example.com"));
-reply.To.Add(new MailboxAddress("Customer", "customer@example.com"));
-reply.Subject = "Re: Quotation";
-reply.InReplyTo = originalMessageIdHeader;      // from GetHeader("Message-ID")
+var reply = new GmailOutgoingMessage
+{
+    From      = new GmailAddress("support@example.com", "Support"),
+    Subject   = "Re: Quotation",
+    TextBody  = "Attached.",
+    HtmlBody  = "<p>Attached.</p>",
+    InReplyTo = originalMessageIdHeader,        // from GetHeader("Message-ID")
+};
+reply.To.Add(new GmailAddress("customer@example.com", "Customer"));
 reply.References.Add(originalMessageIdHeader);
-reply.Body = new TextPart("html") { Text = "<p>Attached.</p>" };
+reply.Attachments.Add(new GmailAttachmentContent
+{
+    FileName    = "quote.pdf",
+    ContentType = "application/pdf",
+    Content     = await File.ReadAllBytesAsync(path, ct),
+});
 
 GmailMessage sent = await gmail.SendAsync(reply, threadId: originalThreadId, ct);
+```
+
+No MIME library is involved: `GmailOutgoingMessage.ToRfc822Bytes()` writes the RFC 822 message itself (UTF-8, base64, RFC 2047 headers). If you already build messages with MimeKit or anything else, hand over the bytes instead:
+
+```csharp
+GmailMessage sent = await gmail.SendRawAsync(rfc822Bytes, threadId: originalThreadId, ct);
 ```
 
 Gmail replaces `From` with the authenticated mailbox (or a verified send-as alias), so the address you put there mostly serves as the display name.
@@ -222,4 +237,5 @@ Every non-2xx response is a `GmailApiException`; 429 and 5xx are retried three t
 
 - [Configuration](./configuration.md) — every option, plus the "no refresh token" and "7-day expiry" gotchas
 - [API Reference](./api.md) — every member, parameter and exception
+- [Migration](./migration.md) — 1.0.0 → 2.0.0
 - [Changelog](./changelog.md)

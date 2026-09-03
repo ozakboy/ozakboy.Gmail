@@ -26,7 +26,7 @@ const jsonLd = {
     price: '0',
     priceCurrency: 'USD',
   },
-  softwareVersion: '1.0.0',
+  softwareVersion: '2.0.0',
 }
 
 useHead({

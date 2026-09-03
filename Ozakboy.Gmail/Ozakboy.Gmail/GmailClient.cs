@@ -7,7 +7,6 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using MimeKit;
 using Ozakboy.Gmail.Core;
 
 namespace Ozakboy.Gmail
@@ -146,16 +145,19 @@ namespace Ozakboy.Gmail
             return _http.SendForJsonAsync<GmailMessage>(() => new HttpRequestMessage(HttpMethod.Get, url), false, cancellationToken);
         }
 
-        /// <inheritdoc />
-        public async Task<MimeMessage> GetMessageRawAsync(string id, CancellationToken cancellationToken = default)
+        /// <summary>
+        /// 以 format=raw 取回郵件,回傳 base64url 解碼後的完整 RFC 822 位元組;可交給任何 MIME 函式庫解析。
+        /// Fetches the message with format=raw and returns the base64url-decoded RFC 822 bytes, ready for any MIME parser.
+        /// </summary>
+        /// <param name="id">郵件識別碼,null 或空字串時擲出例外。The message id; null or empty throws.</param>
+        /// <param name="cancellationToken">取消權杖。Cancellation token.</param>
+        /// <returns>RFC 822 郵件位元組;Gmail 沒回傳 raw 時為空陣列。The RFC 822 bytes; an empty array when Gmail returned no raw field.</returns>
+        /// <exception cref="ArgumentException"><paramref name="id"/> 為 null 或空白時擲出。Thrown when <paramref name="id"/> is null or blank.</exception>
+        /// <exception cref="GmailApiException">Gmail 回傳非 2xx 時擲出。Thrown when Gmail answers with a non-2xx status.</exception>
+        public async Task<byte[]> GetMessageRawAsync(string id, CancellationToken cancellationToken = default)
         {
             var message = await GetMessageAsync(id, GmailMessageFormat.Raw, null, cancellationToken).ConfigureAwait(false);
-            var raw = Base64Url.Decode(message.Raw ?? string.Empty);
-
-            using (var buffer = new MemoryStream(raw, false))
-            {
-                return await MimeMessage.LoadAsync(buffer, cancellationToken).ConfigureAwait(false);
-            }
+            return message.DecodeRaw() ?? Array.Empty<byte>();
         }
 
         /// <inheritdoc />
@@ -373,27 +375,50 @@ namespace Ozakboy.Gmail
             return attachment.Data.LongLength;
         }
 
-        /// <inheritdoc />
-        public async Task<GmailMessage> SendAsync(MimeMessage message, string? threadId = null, CancellationToken cancellationToken = default)
+        /// <summary>
+        /// 寄出郵件。郵件由內建組信器序列化成 RFC 822 後以 message/rfc822 多段上傳,因此只需要 gmail.modify 範圍,不必開 SMTP。
+        /// Sends a message. The built-in writer serialises it to RFC 822 and uploads it as message/rfc822, so the gmail.modify scope is enough and no SMTP connection is needed.
+        /// </summary>
+        /// <param name="message">要寄出的郵件,null 時擲出例外。The message to send; null throws.</param>
+        /// <param name="threadId">要併入的討論串識別碼,null 表示開新討論串。The thread to join; null starts a new thread.</param>
+        /// <param name="cancellationToken">取消權杖。Cancellation token.</param>
+        /// <returns>已寄出的郵件(含 Id、ThreadId 與 LabelIds)。The sent message, carrying Id, ThreadId and LabelIds.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="message"/> 為 null 時擲出。Thrown when <paramref name="message"/> is null.</exception>
+        /// <exception cref="InvalidOperationException">郵件沒有收件人或標頭不合法時擲出(見 <see cref="GmailOutgoingMessage.ToRfc822Bytes"/>)。Thrown when the message has no recipients or an invalid header (see <see cref="GmailOutgoingMessage.ToRfc822Bytes"/>).</exception>
+        /// <exception cref="GmailApiException">Gmail 回傳非 2xx 時擲出。Thrown when Gmail answers with a non-2xx status.</exception>
+        public Task<GmailMessage> SendAsync(GmailOutgoingMessage message, string? threadId = null, CancellationToken cancellationToken = default)
         {
             if (message == null)
                 throw new ArgumentNullException(nameof(message));
 
-            // 先把 RFC 822 內容算成位元組,重試時才能重建同一份請求
-            // The RFC 822 bytes are produced up front so a retry can rebuild the very same request.
-            byte[] rfc822;
-            using (var buffer = new MemoryStream())
-            {
-                await message.WriteToAsync(buffer, cancellationToken).ConfigureAwait(false);
-                rfc822 = buffer.ToArray();
-            }
+            return SendRawAsync(message.ToRfc822Bytes(), threadId, cancellationToken);
+        }
 
+        /// <summary>
+        /// 寄出呼叫端自行組好的 RFC 822 郵件位元組,原封不動以 message/rfc822 多段上傳。
+        /// Sends caller-composed RFC 822 bytes, uploaded verbatim as message/rfc822.
+        /// </summary>
+        /// <param name="rfc822">完整的 RFC 822 郵件;null 或空陣列時擲出例外。The complete RFC 822 message; null or empty throws.</param>
+        /// <param name="threadId">要併入的討論串識別碼,null 表示開新討論串。The thread to join; null starts a new thread.</param>
+        /// <param name="cancellationToken">取消權杖。Cancellation token.</param>
+        /// <returns>已寄出的郵件(含 Id、ThreadId 與 LabelIds)。The sent message, carrying Id, ThreadId and LabelIds.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="rfc822"/> 為 null 時擲出。Thrown when <paramref name="rfc822"/> is null.</exception>
+        /// <exception cref="ArgumentException"><paramref name="rfc822"/> 為空陣列時擲出。Thrown when <paramref name="rfc822"/> is empty.</exception>
+        /// <exception cref="GmailApiException">Gmail 回傳非 2xx 時擲出。Thrown when Gmail answers with a non-2xx status.</exception>
+        public Task<GmailMessage> SendRawAsync(byte[] rfc822, string? threadId = null, CancellationToken cancellationToken = default)
+        {
+            if (rfc822 == null)
+                throw new ArgumentNullException(nameof(rfc822));
+
+            if (rfc822.Length == 0)
+                throw new ArgumentException("RFC 822 郵件內容不可為空。The RFC 822 message cannot be empty.", nameof(rfc822));
+
+            // 位元組先算好,重試時 factory 才能重建同一份請求
+            // The bytes are fixed up front so the factory can rebuild the very same request on retry.
             var metadata = GmailJson.Serialize(new GmailSendMetadata { ThreadId = threadId });
             var url = UploadBaseUrl + _userId + "/messages/send?uploadType=multipart";
 
-            return await _http
-                .SendForJsonAsync<GmailMessage>(() => CreateSendRequest(url, metadata, rfc822), false, cancellationToken)
-                .ConfigureAwait(false);
+            return _http.SendForJsonAsync<GmailMessage>(() => CreateSendRequest(url, metadata, rfc822), false, cancellationToken);
         }
 
         /// <summary>

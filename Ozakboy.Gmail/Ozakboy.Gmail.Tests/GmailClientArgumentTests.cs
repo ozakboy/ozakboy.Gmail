@@ -4,7 +4,6 @@ using System.IO;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
-using MimeKit;
 using Ozakboy.Gmail.Tests.TestSupport;
 using Xunit;
 
@@ -255,15 +254,29 @@ namespace Ozakboy.Gmail.Tests
         }
 
         [Fact]
-        public void MimeKit郵件可以被組出來供寄送測試使用()
+        public async Task SendAsync_郵件為null_拋ArgumentNullException()
         {
-            var message = new MimeMessage();
-            message.From.Add(new MailboxAddress("寄件者", "sender@example.com"));
-            message.To.Add(new MailboxAddress("收件者", "receiver@example.com"));
-            message.Subject = "主旨";
-            message.Body = new TextPart("plain") { Text = "內文" };
+            var client = GmailTestFactory.CreateClient(new RecordingHandler());
 
-            Assert.Equal("主旨", message.Subject);
+            await Assert.ThrowsAsync<ArgumentNullException>(() => client.SendAsync(null));
+        }
+
+        [Fact]
+        public async Task SendRawAsync_位元組為null_拋ArgumentNullException()
+        {
+            var client = GmailTestFactory.CreateClient(new RecordingHandler());
+
+            await Assert.ThrowsAsync<ArgumentNullException>(() => client.SendRawAsync(null));
+        }
+
+        [Fact]
+        public async Task SendRawAsync_位元組為空_拋ArgumentException()
+        {
+            var handler = new RecordingHandler();
+            var client = GmailTestFactory.CreateClient(handler);
+
+            await Assert.ThrowsAsync<ArgumentException>(() => client.SendRawAsync(Array.Empty<byte>()));
+            Assert.Equal(0, handler.RequestCount);
         }
     }
 }

@@ -1,6 +1,6 @@
 ---
 title: 設定
-description: Ozakboy.Gmail 1.0.0 的每個選項——GoogleOAuthOptions、GoogleAuthorizationUrlOptions、GmailClientOptions——以及 Google 端的設定與常見的坑。
+description: Ozakboy.Gmail 2.0.0 的每個選項——GoogleOAuthOptions、GoogleAuthorizationUrlOptions、GmailClientOptions——以及 Google 端的設定與常見的坑。
 ---
 
 # 設定

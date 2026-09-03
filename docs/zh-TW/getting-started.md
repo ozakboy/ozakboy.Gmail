@@ -1,6 +1,6 @@
 ---
 title: 快速開始
-description: 安裝 Ozakboy.Gmail 1.0.0,用 Google OAuth 連接 Gmail 帳號,讀出第一批信。
+description: 安裝 Ozakboy.Gmail 2.0.0,用 Google OAuth 連接 Gmail 帳號,讀出第一批信。
 ---
 
 # 快速開始
@@ -8,7 +8,7 @@ description: 安裝 Ozakboy.Gmail 1.0.0,用 Google OAuth 連接 Gmail 帳號,讀
 ## 安裝
 
 ```bash
-dotnet add package Ozakboy.Gmail --version 1.0.0
+dotnet add package Ozakboy.Gmail --version 2.0.0
 ```
 
 支援的目標框架:`netstandard2.0`、`netstandard2.1`、`net8.0`、`net9.0`、`net10.0`。
@@ -190,15 +190,30 @@ GmailLabel label = await gmail.CreateLabelAsync("Sower/Ads", cancellationToken: 
 await gmail.BatchModifyLabelsAsync(adIds, addLabelIds: new[] { label.Id! }, removeLabelIds: null, ct);
 await gmail.TrashAsync(messageId, ct);          // 30 天內可救;沒有永久刪除
 
-var reply = new MimeMessage();
-reply.From.Add(new MailboxAddress("客服", "support@example.com"));
-reply.To.Add(new MailboxAddress("客戶", "customer@example.com"));
-reply.Subject = "Re: 報價確認";
-reply.InReplyTo = originalMessageIdHeader;      // 來自 GetHeader("Message-ID")
+var reply = new GmailOutgoingMessage
+{
+    From      = new GmailAddress("support@example.com", "客服"),
+    Subject   = "Re: 報價確認",
+    TextBody  = "附件如附。",
+    HtmlBody  = "<p>附件如附。</p>",
+    InReplyTo = originalMessageIdHeader,        // 來自 GetHeader("Message-ID")
+};
+reply.To.Add(new GmailAddress("customer@example.com", "客戶"));
 reply.References.Add(originalMessageIdHeader);
-reply.Body = new TextPart("html") { Text = "<p>附件如附。</p>" };
+reply.Attachments.Add(new GmailAttachmentContent
+{
+    FileName    = "報價單.pdf",
+    ContentType = "application/pdf",
+    Content     = await File.ReadAllBytesAsync(path, ct),
+});
 
 GmailMessage sent = await gmail.SendAsync(reply, threadId: originalThreadId, ct);
+```
+
+整個過程沒有 MIME 函式庫:`GmailOutgoingMessage.ToRfc822Bytes()` 自己寫出 RFC 822 信件(UTF-8、base64、RFC 2047 標頭)。你若已經用 MimeKit 或其他工具組信,直接把 bytes 交出去:
+
+```csharp
+GmailMessage sent = await gmail.SendRawAsync(rfc822Bytes, threadId: originalThreadId, ct);
 ```
 
 Gmail 會把 `From` 換成已授權的信箱(或已驗證的 send-as 別名),你填的地址主要只剩顯示名稱的作用。
@@ -222,4 +237,5 @@ catch (GmailApiException ex)                            { logger.LogError(ex, "{
 
 - [設定](./configuration.md)——每個選項,以及「沒拿到 refresh token」「7 天失效」兩個坑
 - [API 文件](./api.md)——每個成員、參數與例外
+- [升級指南](./migration.md)——1.0.0 → 2.0.0
 - [版本紀錄](./changelog.md)

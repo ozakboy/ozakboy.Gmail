@@ -10,6 +10,29 @@ description: Ozakboy.Gmail 所有重要變更。
 
 ---
 
+## [2.0.0] - 2026-09-03
+
+> **不再相依 MimeKit。** 寄出的信由內建 RFC 822 組信器組裝,或以 raw bytes 交入;原始信改以 bytes 回傳。**破壞性變更**:兩個簽章改了——見[升級指南](./migration.md)。其餘與 1.0.0 完全相同。
+
+### 新增功能
+
+- **`GmailOutgoingMessage`**——小型寄件模型(`From`、`To`、`Cc`、`Bcc`、`ReplyTo`、`Subject`、`TextBody`、`HtmlBody`、`Attachments`、`InReplyTo`、`References`、額外 `Headers`),附 `ToRfc822Bytes()`:內建 RFC 822 / MIME 組信器——UTF-8、base64 內文與附件、RFC 2047 標頭編碼、text + HTML 用 `multipart/alternative`、附件用 `multipart/mixed`。
+- **`GmailAddress`**(地址 + 選填顯示名,含驗證)與 **`GmailAttachmentContent`**(`FileName`、`ContentType`、`byte[] Content`)作為 `GmailOutgoingMessage` 的零件。
+- **`SendRawAsync(byte[] rfc822, threadId)`**——用任何 MIME 函式庫組好的信直接寄;bytes 原封不動上傳。
+- **`GmailMessage.DecodeRaw()`**——以 `GmailMessageFormat.Raw` 取回的信,base64url 解碼後的 RFC 822 bytes。
+
+### 破壞性變更
+
+- **`SendAsync(MimeMessage, threadId)` → `SendAsync(GmailOutgoingMessage, threadId)`。** 用 `GmailOutgoingMessage` 組信,或在自己的專案保留 MimeKit、序列化後呼叫 `SendRawAsync`。
+- **`GetMessageRawAsync(id)` 改回 `Task<byte[]>`**,不再回 `Task<MimeMessage>`。用任何 MIME 函式庫解析,或改用 `GetMessageAsync(id, GmailMessageFormat.Full)`——Gmail 已經拆好 part。
+- **套件不再參考 `MimeKit`。** 靠遞移參考用到 MimeKit 型別的專案要自己加套件。
+
+### 技術改進
+
+- RFC 822 組信器在測試專案以 MimeKit(僅測試相依)解析輸出反向驗證:地址與顯示名、非 ASCII 主旨與檔名 round-trip、`multipart/alternative` + `multipart/mixed` 結構、附件 bytes、標頭折行與行長限制。
+
+---
+
 ## [1.0.0] - 2026-09-03
 
 > 首次發佈。薄的、只提供非同步 API 的 Gmail REST 客戶端,外加 Google OAuth 2.0 token 端點——不依賴 `Google.Apis`、不存 token、不走 SMTP。寄信經 `messages.send`,所以單一 `gmail.modify` scope 就夠。

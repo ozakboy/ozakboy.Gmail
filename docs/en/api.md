@@ -1,21 +1,21 @@
 ---
 title: API Reference
-description: Complete public API of Ozakboy.Gmail 1.0.0 — GmailClient, GoogleOAuthClient, models, options and the GmailApiException error contract.
+description: Complete public API of Ozakboy.Gmail 2.0.0 — GmailClient, GoogleOAuthClient, models, options and the GmailApiException error contract.
 ---
 
 # API Reference
 
 > Source of truth: [`Ozakboy.Gmail/Ozakboy.Gmail/`](https://github.com/ozakboy/ozakboy.Gmail/tree/main/Ozakboy.Gmail/Ozakboy.Gmail). The generated XML documentation ships inside the NuGet package.
 
-Ozakboy.Gmail is a thin, async-only client for the [Gmail REST API](https://developers.google.com/workspace/gmail/api/reference/rest) plus the Google OAuth 2.0 token endpoints. It does **not** depend on `Google.Apis.*`, does not store tokens, and does not open SMTP or IMAP connections — sending goes through `messages.send`, so the single `gmail.modify` scope is enough.
+Ozakboy.Gmail is a thin, async-only client for the [Gmail REST API](https://developers.google.com/workspace/gmail/api/reference/rest) plus the Google OAuth 2.0 token endpoints. It does **not** depend on `Google.Apis.*`, does not store tokens, does not open SMTP or IMAP connections, and (since 2.0.0) pulls in no MIME library — outgoing mail is composed by a built-in RFC 822 writer or handed over as raw bytes. Sending goes through `messages.send`, so the single `gmail.modify` scope is enough.
 
-Items marked **(beyond the draft)** were not in the original package specification and were added because a first consumer needs them. Strike any of them and it is removed before 1.0.0.
+Items marked **(beyond the draft)** were not in the original 1.0.0 package specification and were added because a first consumer needs them. Members marked **(2.0.0)** replaced the MimeKit-typed members of 1.0.0 — see [Migration](./migration.md).
 
 ## Namespaces
 
 | Namespace | Contents |
 |---|---|
-| `Ozakboy.Gmail` | `IGmailClient`, `GmailClient`, `GmailClientOptions`, `GmailApiException`, `GmailScopes`, `GmailSystemLabels`, and every `Gmail*` model |
+| `Ozakboy.Gmail` | `IGmailClient`, `GmailClient`, `GmailClientOptions`, `GmailApiException`, `GmailScopes`, `GmailSystemLabels`, `GmailOutgoingMessage`, `GmailAddress`, `GmailAttachmentContent`, and every `Gmail*` model |
 | `Ozakboy.Gmail.OAuth` | `IGoogleOAuthClient`, `GoogleOAuthClient`, `GoogleOAuthOptions`, `GoogleAuthorizationUrlOptions`, `GoogleTokenResponse`, `GoogleIdTokenPayload` |
 | `Ozakboy.Gmail.Core` | Internal HTTP / JSON / base64url plumbing. Not part of the public API — do not take a dependency on it. |
 
@@ -55,7 +55,7 @@ public interface IGmailClient
         IEnumerable<string>? metadataHeaders = null,
         CancellationToken cancellationToken = default);
 
-    Task<MimeMessage> GetMessageRawAsync(string id, CancellationToken cancellationToken = default);
+    Task<byte[]> GetMessageRawAsync(string id, CancellationToken cancellationToken = default);                                                         // (2.0.0: byte[] instead of MimeMessage)
 
     Task<GmailHistoryList> ListHistoryAsync(
         string startHistoryId,
@@ -89,7 +89,8 @@ public interface IGmailClient
     Task<GmailAttachment> GetAttachmentAsync(string messageId, string attachmentId, CancellationToken cancellationToken = default);
     Task<long> DownloadAttachmentAsync(string messageId, string attachmentId, Stream destination, CancellationToken cancellationToken = default);
 
-    Task<GmailMessage> SendAsync(MimeMessage message, string? threadId = null, CancellationToken cancellationToken = default);
+    Task<GmailMessage> SendAsync(GmailOutgoingMessage message, string? threadId = null, CancellationToken cancellationToken = default);   // (2.0.0: GmailOutgoingMessage instead of MimeMessage)
+    Task<GmailMessage> SendRawAsync(byte[] rfc822, string? threadId = null, CancellationToken cancellationToken = default);            // (2.0.0)
 }
 
 public class GmailClient : IGmailClient
@@ -137,7 +138,7 @@ Retries apply to every Gmail call **and** to the OAuth token / revoke calls. A r
 | `GetProfileAsync` | `GET users/{userId}/profile` | `GmailProfile` — the mailbox address and the **current `HistoryId`**, which is what you store before the first backfill so incremental sync can start from it later. |
 | `ListMessagesAsync` | `GET users/{userId}/messages` | `GmailMessageList` with `Messages` (id + threadId only), `NextPageToken`, `ResultSizeEstimate`. `query` is Gmail search syntax (`newer_than:30d`); `maxResults` is capped by Gmail at 500. Pass `NextPageToken` back as `pageToken` to continue. |
 | `GetMessageAsync` | `GET users/{userId}/messages/{id}` | `GmailMessage`. `format` selects how much is returned (see [`GmailMessageFormat`](#25-enumerations)). `metadataHeaders` is only sent with `Metadata` and limits which headers come back. |
-| `GetMessageRawAsync` | `GET …/messages/{id}?format=raw` | The RFC 822 message decoded from base64url and parsed by **MimeKit** into a `MimeMessage`. Use it when you need the full body or attachments as MIME parts. |
+| `GetMessageRawAsync` **(2.0.0)** | `GET …/messages/{id}?format=raw` | The complete RFC 822 message as **decoded bytes** (empty array when Gmail returned no `raw`). Parse it with any MIME library, or skip parsing altogether: `GetMessageAsync(id, GmailMessageFormat.Full)` returns the same message already split into parts by Gmail. |
 | `ListHistoryAsync` | `GET users/{userId}/history` | `GmailHistoryList`. `startHistoryId` must be a history id you obtained earlier. When Gmail has discarded that history (HTTP 404), the exception has `IsHistoryExpired == true` — fall back to a time-window rescan. |
 | `ModifyLabelsAsync` | `POST …/messages/{id}/modify` | The updated `GmailMessage`. Both lists may be `null` or empty; at least one label must be supplied or `ArgumentException` is thrown. |
 | `BatchModifyLabelsAsync` | `POST …/messages/batchModify` | Completes with no result (Gmail returns 204). Gmail accepts at most **1000 ids** per call; more than that throws `ArgumentException` before any request is sent. `ids` empty is a no-op that sends nothing. |
@@ -149,7 +150,8 @@ Retries apply to every Gmail call **and** to the OAuth token / revoke calls. A r
 | `DeleteLabelAsync` **(beyond the draft)** | `DELETE users/{userId}/labels/{id}` | Deletes a **user** label; the label is removed from every message it was applied to. System labels cannot be deleted (Gmail returns 400). |
 | `GetAttachmentAsync` | `GET …/messages/{messageId}/attachments/{attachmentId}` | `GmailAttachment` with the **already-decoded** bytes in `Data` and Gmail's `Size`. Gmail returns attachments as base64url inside a JSON body, so the whole attachment is buffered in memory once — there is no true streaming on the wire. |
 | `DownloadAttachmentAsync` | same | Decodes and writes the bytes into `destination`, returns the number of bytes written. Meant for proxying a download into an HTTP response without touching disk. `destination` must be writable; the stream is **not** closed or flushed for you. |
-| `SendAsync` | `POST upload/gmail/v1/users/{userId}/messages/send?uploadType=multipart` | The sent `GmailMessage` (`Id`, `ThreadId`, `LabelIds`). The `MimeMessage` is serialised by MimeKit and uploaded as `message/rfc822` in a multipart request, so the 35 MB upload limit applies rather than the JSON `raw` limit. `threadId` makes the message part of an existing thread — for a reply, also set `In-Reply-To` and `References` on the `MimeMessage` yourself, or Gmail will not thread it. |
+| `SendAsync` **(2.0.0)** | `POST upload/gmail/v1/users/{userId}/messages/send?uploadType=multipart` | The sent `GmailMessage` (`Id`, `ThreadId`, `LabelIds`). The [`GmailOutgoingMessage`](#27-outgoing-mail--gmailoutgoingmessage-gmailaddress-gmailattachmentcontent) is serialised by the built-in RFC 822 writer (`ToRfc822Bytes()`) and uploaded as `message/rfc822` in a multipart request, so the 35 MB upload limit applies rather than the JSON `raw` limit. `threadId` makes the message part of an existing thread — for a reply, also set `InReplyTo` and `References`, or Gmail will not thread it. |
+| `SendRawAsync` **(2.0.0)** | same | Same upload, but you supply the RFC 822 bytes yourself — from MimeKit, MailKit, `System.Net.Mail` or anything else. `rfc822` `null` → `ArgumentNullException`, empty → `ArgumentException`. |
 
 **`SendAsync` and the sender address.** Gmail rewrites `From` to the authenticated mailbox (or one of its verified send-as aliases). A `From` that is not verified does not fail — it is silently replaced.
 
@@ -201,6 +203,7 @@ public class GmailMessage
 
     public DateTimeOffset? InternalDateTime { get; }       // InternalDate converted; null when 0
     public string? GetHeader(string name);                  // case-insensitive lookup in Payload.Headers; null when absent
+    public byte[]? DecodeRaw();                              // (2.0.0) Raw base64url-decoded; null when Raw is null
 }
 
 public class GmailMessagePart
@@ -335,6 +338,62 @@ public static class GmailSystemLabels
 
 Only the scopes this package is designed for are listed. `mail.google.com` is intentionally absent.
 
+### 2.7 Outgoing mail — `GmailOutgoingMessage`, `GmailAddress`, `GmailAttachmentContent`
+
+Added in 2.0.0, replacing the MimeKit `MimeMessage` parameter of `SendAsync`.
+
+```csharp
+public class GmailAddress
+{
+    public GmailAddress(string address);                 // Name = null
+    public GmailAddress(string address, string? name);
+    public string  Address { get; }                      // must contain '@', no whitespace / CR / LF → ArgumentException
+    public string? Name    { get; }                      // display name; blank is normalised to null; CR / LF → ArgumentException
+    public override string ToString();                   // "Name <address>" or "address" — for display only, not RFC 2047 encoded
+}
+
+public class GmailAttachmentContent
+{
+    public string FileName    { get; set; } = "";                          // blank → "attachment"
+    public string ContentType { get; set; } = "application/octet-stream"; // blank → application/octet-stream
+    public byte[] Content     { get; set; } = Array.Empty<byte>();        // never null (null is stored as an empty array)
+}
+
+public class GmailOutgoingMessage
+{
+    public GmailAddress?                From        { get; set; }   // null → no From header; Gmail fills in the authenticated mailbox
+    public List<GmailAddress>           To          { get; }        // never null
+    public List<GmailAddress>           Cc          { get; }        // never null
+    public List<GmailAddress>           Bcc         { get; }        // never null; Gmail delivers to Bcc recipients listed in the header
+    public GmailAddress?                ReplyTo     { get; set; }
+    public string?                      Subject     { get; set; }   // null / empty → no Subject header
+    public string?                      TextBody    { get; set; }
+    public string?                      HtmlBody    { get; set; }
+    public List<GmailAttachmentContent> Attachments { get; }        // never null
+    public string?                      InReplyTo   { get; set; }   // Message-ID of the original; angle brackets added when missing
+    public List<string>                 References  { get; }        // Message-IDs; angle brackets added when missing
+    public List<GmailHeader>            Headers     { get; }        // extra headers (X-…); clashing with a generated header → InvalidOperationException
+
+    public byte[] ToRfc822Bytes();                                  // the exact bytes SendAsync uploads
+}
+```
+
+**What `ToRfc822Bytes()` produces**
+
+| Situation | Structure |
+|---|---|
+| Only `TextBody` or only `HtmlBody` | a single `text/plain` or `text/html` part, `charset=utf-8`, base64 |
+| Both bodies | `multipart/alternative` — text first, HTML second |
+| Neither body | an empty `text/plain` part |
+| Any attachment | the body (single part or alternative) wrapped in `multipart/mixed`, each attachment as `Content-Disposition: attachment`, base64 |
+
+- Headers are written in this order: `From`, `To`, `Cc`, `Bcc`, `Reply-To`, `Subject`, `In-Reply-To`, `References`, your extra `Headers`, `MIME-Version`, `Content-Type`. `Date` and `Message-ID` are **not** written — Gmail assigns them.
+- Non-ASCII display names, subjects, extra header values and file names are RFC 2047 `=?utf-8?B?…?=` encoded and folded so no line exceeds the RFC 5322 limits. ASCII values are written verbatim.
+- Bodies and attachments are always base64 (76-character lines, CRLF). There is no quoted-printable and no 8-bit mode.
+- Not supported: inline images (`cid:` / `multipart/related`), S/MIME, nested `message/rfc822` parts, custom transfer encodings. For those, compose the message with a MIME library and use `SendRawAsync`.
+
+**Throws** (`ToRfc822Bytes()` and therefore `SendAsync`): `InvalidOperationException` when `To`, `Cc` and `Bcc` are all empty, when an extra header clashes with a generated one (case-insensitive), or when `InReplyTo` / `References` / a header value contains CR or LF.
+
 ---
 
 ## 3. `IGoogleOAuthClient` / `GoogleOAuthClient` (`Ozakboy.Gmail.OAuth`)
@@ -448,9 +507,8 @@ public class GoogleIdTokenPayload
 | `OperationCanceledException` | The `CancellationToken` was cancelled. Propagates unwrapped, even mid-retry-delay. |
 | `HttpRequestException` | Network / DNS / TLS failure before a response was received. Propagates unwrapped and is not retried. |
 | `ArgumentNullException` / `ArgumentException` / `ArgumentOutOfRangeException` | Invalid arguments, thrown **before** any request is sent (null ids, empty label lists, more than 1000 batch ids, negative `MaxRetries`, empty `ClientId`…). |
-| `InvalidOperationException` | `accessTokenProvider` returned `null` or an empty string. |
+| `InvalidOperationException` | `accessTokenProvider` returned `null` or an empty string; or `GmailOutgoingMessage.ToRfc822Bytes()` / `SendAsync` found no recipients, a clashing extra header, or CR / LF in a header value. |
 | `FormatException` | `GoogleIdTokenPayload.Parse` received something that is not a JWT. |
-| `MimeKit.ParseException` and friends | `GetMessageRawAsync` received bytes MimeKit could not parse. Propagates unwrapped. |
 
 ### `GmailApiException`
 
@@ -506,7 +564,13 @@ Delays are `RetryBaseDelay × 2^(attempt-1)`, so 1s, 2s, 4s by default. The `acc
 | `name` is `null` (`UpdateLabelAsync`) | Name unchanged |
 | `Prompt` is `null` (`GoogleAuthorizationUrlOptions`) | `prompt` parameter omitted |
 | Any required string argument (`id`, `messageId`, `attachmentId`, `name`, `code`, `refreshToken`, `token`, `redirectUri`, `state`, `startHistoryId`) is `null` or empty | `ArgumentException` |
-| `message` (`SendAsync`), `destination` (`DownloadAttachmentAsync`) or `scopes` (`BuildAuthorizationUrl`) is `null` | `ArgumentNullException` |
+| `message` (`SendAsync`), `rfc822` (`SendRawAsync`), `destination` (`DownloadAttachmentAsync`) or `scopes` (`BuildAuthorizationUrl`) is `null` | `ArgumentNullException` |
+| `rfc822` is empty (`SendRawAsync`) | `ArgumentException` |
+| `GmailOutgoingMessage.From` is `null` | No `From` header; Gmail fills in the authenticated mailbox |
+| `GmailOutgoingMessage.Subject` is `null` or empty | No `Subject` header |
+| `GmailOutgoingMessage.TextBody` and `HtmlBody` both `null` | An empty `text/plain` part |
+| `GmailAttachmentContent.FileName` blank / `ContentType` blank / `Content` null | `attachment` / `application/octet-stream` / empty array |
+| `GmailMessage.Raw` is `null` | `DecodeRaw()` returns `null`; `GetMessageRawAsync` returns an empty array |
 | `scopes` is an empty sequence (`BuildAuthorizationUrl`) | `ArgumentException` |
 | `destination` is not writable (`DownloadAttachmentAsync`) | `ArgumentException` |
 | `GmailClientOptions.UserId` is `null` or blank | `me` |
@@ -524,4 +588,5 @@ Delays are `RetryBaseDelay × 2^(attempt-1)`, so 1s, 2s, 4s by default. The `acc
 
 - [Getting Started](./getting-started.md)
 - [Configuration](./configuration.md)
+- [Migration](./migration.md)
 - [Changelog](./changelog.md)

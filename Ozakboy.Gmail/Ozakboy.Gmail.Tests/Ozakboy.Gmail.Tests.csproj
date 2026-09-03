@@ -21,6 +21,8 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.Extensions.Configuration" Version="8.0.0" />
+    <!-- 只用來解析組信器輸出做反向驗證;主函式庫本身不依賴 MimeKit -->
+    <PackageReference Include="MimeKit" Version="4.17.0" />
   </ItemGroup>
 
   <ItemGroup>

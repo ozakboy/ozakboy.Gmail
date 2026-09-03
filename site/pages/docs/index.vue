@@ -7,6 +7,7 @@ const sections = [
   { path: '/docs/configuration', key: 'configuration', icon: '⚙️' },
   { path: '/docs/api', key: 'api', icon: '📘' },
   { path: '/docs/changelog', key: 'changelog', icon: '📜' },
+  { path: '/docs/migration', key: 'migration', icon: '🧳' },
 ]
 </script>
 

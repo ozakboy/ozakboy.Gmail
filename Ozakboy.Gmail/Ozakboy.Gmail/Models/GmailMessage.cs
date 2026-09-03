@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Ozakboy.Gmail.Core;
 
 namespace Ozakboy.Gmail
 {
@@ -84,6 +85,17 @@ namespace Ozakboy.Gmail
         public string? GetHeader(string name)
         {
             return Payload?.GetHeader(name);
+        }
+
+        /// <summary>
+        /// 將 <see cref="Raw"/> 做 base64url 解碼,得到完整的 RFC 822 郵件位元組;可交給任何 MIME 函式庫解析。
+        /// Decodes <see cref="Raw"/> from base64url into the complete RFC 822 message bytes, ready for any MIME parser.
+        /// </summary>
+        /// <returns>解碼後的位元組;<see cref="Raw"/> 為 null 時為 null。The decoded bytes, or null when <see cref="Raw"/> is null.</returns>
+        /// <exception cref="FormatException"><see cref="Raw"/> 不是合法的 base64url 時擲出。Thrown when <see cref="Raw"/> is not valid base64url.</exception>
+        public byte[]? DecodeRaw()
+        {
+            return Raw == null ? null : Base64Url.Decode(Raw);
         }
     }
 }

@@ -1,21 +1,21 @@
 ---
 title: API 文件
-description: Ozakboy.Gmail 1.0.0 完整公開 API——GmailClient、GoogleOAuthClient、模型、選項與 GmailApiException 錯誤契約。
+description: Ozakboy.Gmail 2.0.0 完整公開 API——GmailClient、GoogleOAuthClient、模型、選項與 GmailApiException 錯誤契約。
 ---
 
 # API 文件
 
 > 以原始碼為準:[`Ozakboy.Gmail/Ozakboy.Gmail/`](https://github.com/ozakboy/ozakboy.Gmail/tree/main/Ozakboy.Gmail/Ozakboy.Gmail)。產生的 XML 文件檔隨 NuGet 套件一起發佈。
 
-Ozakboy.Gmail 是一個薄的、只提供非同步 API 的 [Gmail REST API](https://developers.google.com/workspace/gmail/api/reference/rest) 客戶端,外加 Google OAuth 2.0 token 端點。**不依賴** `Google.Apis.*`、不儲存 token、不開 SMTP 或 IMAP 連線——寄信走 `messages.send`,所以單一 `gmail.modify` scope 就夠。
+Ozakboy.Gmail 是一個薄的、只提供非同步 API 的 [Gmail REST API](https://developers.google.com/workspace/gmail/api/reference/rest) 客戶端,外加 Google OAuth 2.0 token 端點。**不依賴** `Google.Apis.*`、不儲存 token、不開 SMTP 或 IMAP 連線,(2.0.0 起)也不帶任何 MIME 函式庫——寄出的信由內建 RFC 822 組信器組裝或以 raw bytes 交入。寄信走 `messages.send`,所以單一 `gmail.modify` scope 就夠。
 
-標示 **(草案外新增)** 的項目不在原本的套件規格裡,是因為第一個使用者(Sower)會用到而補上。任何一項劃掉,1.0.0 就不做。
+標示 **(草案外新增)** 的項目不在原本 1.0.0 的套件規格裡,是因為第一個使用者(Sower)會用到而補上。標示 **(2.0.0)** 的成員取代了 1.0.0 用 MimeKit 型別的成員——見[升級指南](./migration.md)。
 
 ## 命名空間
 
 | 命名空間 | 內容 |
 |---|---|
-| `Ozakboy.Gmail` | `IGmailClient`、`GmailClient`、`GmailClientOptions`、`GmailApiException`、`GmailScopes`、`GmailSystemLabels` 與所有 `Gmail*` 模型 |
+| `Ozakboy.Gmail` | `IGmailClient`、`GmailClient`、`GmailClientOptions`、`GmailApiException`、`GmailScopes`、`GmailSystemLabels`、`GmailOutgoingMessage`、`GmailAddress`、`GmailAttachmentContent` 與所有 `Gmail*` 模型 |
 | `Ozakboy.Gmail.OAuth` | `IGoogleOAuthClient`、`GoogleOAuthClient`、`GoogleOAuthOptions`、`GoogleAuthorizationUrlOptions`、`GoogleTokenResponse`、`GoogleIdTokenPayload` |
 | `Ozakboy.Gmail.Core` | 內部 HTTP / JSON / base64url 管線。**不屬於公開 API**,請勿依賴。 |
 
@@ -55,7 +55,7 @@ public interface IGmailClient
         IEnumerable<string>? metadataHeaders = null,
         CancellationToken cancellationToken = default);
 
-    Task<MimeMessage> GetMessageRawAsync(string id, CancellationToken cancellationToken = default);
+    Task<byte[]> GetMessageRawAsync(string id, CancellationToken cancellationToken = default);                                                         // (2.0.0:改回 byte[])
 
     Task<GmailHistoryList> ListHistoryAsync(
         string startHistoryId,
@@ -89,7 +89,8 @@ public interface IGmailClient
     Task<GmailAttachment> GetAttachmentAsync(string messageId, string attachmentId, CancellationToken cancellationToken = default);
     Task<long> DownloadAttachmentAsync(string messageId, string attachmentId, Stream destination, CancellationToken cancellationToken = default);
 
-    Task<GmailMessage> SendAsync(MimeMessage message, string? threadId = null, CancellationToken cancellationToken = default);
+    Task<GmailMessage> SendAsync(GmailOutgoingMessage message, string? threadId = null, CancellationToken cancellationToken = default);   // (2.0.0:改吃 GmailOutgoingMessage)
+    Task<GmailMessage> SendRawAsync(byte[] rfc822, string? threadId = null, CancellationToken cancellationToken = default);            // (2.0.0)
 }
 
 public class GmailClient : IGmailClient
@@ -137,7 +138,7 @@ public class GmailClientOptions
 | `GetProfileAsync` | `GET users/{userId}/profile` | `GmailProfile`——信箱地址與**目前的 `HistoryId`**,首次回填前先存起來,之後增量同步從它開始。 |
 | `ListMessagesAsync` | `GET users/{userId}/messages` | `GmailMessageList`,含 `Messages`(只有 id + threadId)、`NextPageToken`、`ResultSizeEstimate`。`query` 是 Gmail 搜尋語法(`newer_than:30d`);`maxResults` 上限由 Gmail 定為 500。把 `NextPageToken` 傳回 `pageToken` 續抓。 |
 | `GetMessageAsync` | `GET users/{userId}/messages/{id}` | `GmailMessage`。`format` 決定回多少(見 [`GmailMessageFormat`](#25-列舉))。`metadataHeaders` 只在 `Metadata` 時送出,限制回哪些標頭。 |
-| `GetMessageRawAsync` | `GET …/messages/{id}?format=raw` | 把 base64url 解碼後的 RFC 822 原文交給 **MimeKit** 解析成 `MimeMessage`。要完整正文或附件 MIME part 時用這個。 |
+| `GetMessageRawAsync` **(2.0.0)** | `GET …/messages/{id}?format=raw` | 完整的 RFC 822 原文,**已解碼的 bytes**(Gmail 沒回 `raw` 時為空陣列)。用任何 MIME 函式庫解析,或乾脆不解析:`GetMessageAsync(id, GmailMessageFormat.Full)` 回的就是 Gmail 已拆好 part 的同一封信。 |
 | `ListHistoryAsync` | `GET users/{userId}/history` | `GmailHistoryList`。`startHistoryId` 必須是先前取得的 history id。Gmail 已丟棄該段歷史時(HTTP 404),例外的 `IsHistoryExpired == true`——退回時間窗口重掃。 |
 | `ModifyLabelsAsync` | `POST …/messages/{id}/modify` | 更新後的 `GmailMessage`。兩個清單可為 `null` 或空,但至少要有一個標籤,否則拋 `ArgumentException`。 |
 | `BatchModifyLabelsAsync` | `POST …/messages/batchModify` | 無回傳值(Gmail 回 204)。Gmail 一次最多 **1000 個 id**,超過在送出前就拋 `ArgumentException`。`ids` 為空是 no-op、不送請求。 |
@@ -149,7 +150,8 @@ public class GmailClientOptions
 | `DeleteLabelAsync` **(草案外新增)** | `DELETE users/{userId}/labels/{id}` | 刪除**使用者**標籤;所有貼過該標籤的信會被移除標籤。系統標籤不可刪(Gmail 回 400)。 |
 | `GetAttachmentAsync` | `GET …/messages/{messageId}/attachments/{attachmentId}` | `GmailAttachment`,`Data` 是**已解碼**的位元組、`Size` 是 Gmail 回報的大小。Gmail 附件是 JSON 包 base64url,整包必須在記憶體緩衝一次——線路上沒有真正的串流。 |
 | `DownloadAttachmentAsync` | 同上 | 解碼後寫進 `destination`,回寫入的位元組數。用途是把下載代理進 HTTP 回應、不落磁碟。`destination` 必須可寫;本套件**不會**幫你關閉或 flush。 |
-| `SendAsync` | `POST upload/gmail/v1/users/{userId}/messages/send?uploadType=multipart` | 寄出後的 `GmailMessage`(`Id`、`ThreadId`、`LabelIds`)。`MimeMessage` 由 MimeKit 序列化,以 `message/rfc822` 放進 multipart 上傳,適用 35 MB 上傳上限而非 JSON `raw` 的限制。`threadId` 讓信加入既有討論串——回信時請自行在 `MimeMessage` 設 `In-Reply-To` 與 `References`,否則 Gmail 不會串成同一串。 |
+| `SendAsync` **(2.0.0)** | `POST upload/gmail/v1/users/{userId}/messages/send?uploadType=multipart` | 寄出後的 `GmailMessage`(`Id`、`ThreadId`、`LabelIds`)。[`GmailOutgoingMessage`](#27-寄件模型gmailoutgoingmessagegmailaddressgmailattachmentcontent) 由內建 RFC 822 組信器序列化(`ToRfc822Bytes()`),以 `message/rfc822` 放進 multipart 上傳,適用 35 MB 上傳上限而非 JSON `raw` 的限制。`threadId` 讓信加入既有討論串——回信時請一併設 `InReplyTo` 與 `References`,否則 Gmail 不會串成同一串。 |
+| `SendRawAsync` **(2.0.0)** | 同上 | 同樣的上傳,但 RFC 822 bytes 由你自己提供——MimeKit、MailKit、`System.Net.Mail` 或任何工具都行。`rfc822` 為 `null` → `ArgumentNullException`,空陣列 → `ArgumentException`。 |
 
 **`SendAsync` 與寄件者地址。** Gmail 會把 `From` 改寫成已授權的信箱(或其已驗證的 send-as 別名)。未驗證的 `From` 不會失敗——會被靜默取代。
 
@@ -201,6 +203,7 @@ public class GmailMessage
 
     public DateTimeOffset? InternalDateTime { get; }       // InternalDate 轉換;0 時為 null
     public string? GetHeader(string name);                  // 在 Payload.Headers 不分大小寫查找;沒有回 null
+    public byte[]? DecodeRaw();                              // (2.0.0) Raw 的 base64url 解碼;Raw 為 null 時回 null
 }
 
 public class GmailMessagePart
@@ -335,6 +338,62 @@ public static class GmailSystemLabels
 
 只列本套件設計上會用的 scope。`mail.google.com` 刻意不列。
 
+### 2.7 寄件模型——`GmailOutgoingMessage`、`GmailAddress`、`GmailAttachmentContent`
+
+2.0.0 新增,取代 `SendAsync` 原本的 MimeKit `MimeMessage` 參數。
+
+```csharp
+public class GmailAddress
+{
+    public GmailAddress(string address);                 // Name = null
+    public GmailAddress(string address, string? name);
+    public string  Address { get; }                      // 必須含 '@'、不含空白 / CR / LF → 否則 ArgumentException
+    public string? Name    { get; }                      // 顯示名;空白視為 null;含 CR / LF → ArgumentException
+    public override string ToString();                   // "Name <address>" 或 "address"——只供顯示,未做 RFC 2047 編碼
+}
+
+public class GmailAttachmentContent
+{
+    public string FileName    { get; set; } = "";                          // 空白 → "attachment"
+    public string ContentType { get; set; } = "application/octet-stream"; // 空白 → application/octet-stream
+    public byte[] Content     { get; set; } = Array.Empty<byte>();        // 永不為 null(設 null 存成空陣列)
+}
+
+public class GmailOutgoingMessage
+{
+    public GmailAddress?                From        { get; set; }   // null → 不寫 From 標頭,Gmail 會填已授權信箱
+    public List<GmailAddress>           To          { get; }        // 永不為 null
+    public List<GmailAddress>           Cc          { get; }        // 永不為 null
+    public List<GmailAddress>           Bcc         { get; }        // 永不為 null;Gmail 會依標頭投遞給 Bcc 收件人
+    public GmailAddress?                ReplyTo     { get; set; }
+    public string?                      Subject     { get; set; }   // null / 空 → 不寫 Subject 標頭
+    public string?                      TextBody    { get; set; }
+    public string?                      HtmlBody    { get; set; }
+    public List<GmailAttachmentContent> Attachments { get; }        // 永不為 null
+    public string?                      InReplyTo   { get; set; }   // 原信的 Message-ID;缺角括號會自動補
+    public List<string>                 References  { get; }        // Message-ID 清單;缺角括號會自動補
+    public List<GmailHeader>            Headers     { get; }        // 額外標頭(X-…);與內建標頭同名 → InvalidOperationException
+
+    public byte[] ToRfc822Bytes();                                  // SendAsync 實際上傳的 bytes
+}
+```
+
+**`ToRfc822Bytes()` 的輸出**
+
+| 情境 | 結構 |
+|---|---|
+| 只有 `TextBody` 或只有 `HtmlBody` | 單一 `text/plain` 或 `text/html` 部件,`charset=utf-8`,base64 |
+| 兩種內文都有 | `multipart/alternative`——text 先、HTML 後 |
+| 兩種都沒有 | 一個空的 `text/plain` 部件 |
+| 有任何附件 | 內文(單部件或 alternative)包進 `multipart/mixed`,每個附件 `Content-Disposition: attachment`、base64 |
+
+- 標頭順序:`From`、`To`、`Cc`、`Bcc`、`Reply-To`、`Subject`、`In-Reply-To`、`References`、你的額外 `Headers`、`MIME-Version`、`Content-Type`。**不寫** `Date` 與 `Message-ID`——Gmail 會指定。
+- 非 ASCII 的顯示名、主旨、額外標頭值與檔名一律 RFC 2047 `=?utf-8?B?…?=` 編碼並折行,不會超過 RFC 5322 的行長限制。純 ASCII 的值原樣寫出。
+- 內文與附件一律 base64(76 字元一行、CRLF)。沒有 quoted-printable、沒有 8-bit 模式。
+- 不支援:內嵌圖片(`cid:` / `multipart/related`)、S/MIME、巢狀 `message/rfc822`、自訂傳輸編碼。需要這些請用 MIME 函式庫組信後走 `SendRawAsync`。
+
+**拋出**(`ToRfc822Bytes()`,因此 `SendAsync` 也會):`To`、`Cc`、`Bcc` 全空、額外標頭與內建標頭同名(不分大小寫)、或 `InReplyTo` / `References` / 標頭值含 CR 或 LF 時拋 `InvalidOperationException`。
+
 ---
 
 ## 3. `IGoogleOAuthClient` / `GoogleOAuthClient`(`Ozakboy.Gmail.OAuth`)
@@ -448,9 +507,8 @@ public class GoogleIdTokenPayload
 | `OperationCanceledException` | `CancellationToken` 被取消。原樣上拋,重試等待中也一樣。 |
 | `HttpRequestException` | 收到回應前的網路 / DNS / TLS 失敗。原樣上拋、不重試。 |
 | `ArgumentNullException` / `ArgumentException` / `ArgumentOutOfRangeException` | 參數無效,在**送出任何請求前**拋出(null id、空標籤清單、batch 超過 1000 個 id、`MaxRetries` 為負、`ClientId` 為空……)。 |
-| `InvalidOperationException` | `accessTokenProvider` 回 `null` 或空字串。 |
+| `InvalidOperationException` | `accessTokenProvider` 回 `null` 或空字串;或 `GmailOutgoingMessage.ToRfc822Bytes()` / `SendAsync` 發現沒有收件人、額外標頭與內建標頭衝突、標頭值含 CR / LF。 |
 | `FormatException` | `GoogleIdTokenPayload.Parse` 收到的不是 JWT。 |
-| `MimeKit.ParseException` 等 | `GetMessageRawAsync` 拿到 MimeKit 解析不了的位元組。原樣上拋。 |
 
 ### `GmailApiException`
 
@@ -506,7 +564,13 @@ public class GmailApiException : Exception
 | `name` 為 `null`(`UpdateLabelAsync`) | 名稱不變 |
 | `Prompt` 為 `null`(`GoogleAuthorizationUrlOptions`) | 省略 `prompt` 參數 |
 | 任何必填字串參數(`id`、`messageId`、`attachmentId`、`name`、`code`、`refreshToken`、`token`、`redirectUri`、`state`、`startHistoryId`)為 `null` 或空 | `ArgumentException` |
-| `message`(`SendAsync`)、`destination`(`DownloadAttachmentAsync`)或 `scopes`(`BuildAuthorizationUrl`)為 `null` | `ArgumentNullException` |
+| `message`(`SendAsync`)、`rfc822`(`SendRawAsync`)、`destination`(`DownloadAttachmentAsync`)或 `scopes`(`BuildAuthorizationUrl`)為 `null` | `ArgumentNullException` |
+| `rfc822` 為空陣列(`SendRawAsync`) | `ArgumentException` |
+| `GmailOutgoingMessage.From` 為 `null` | 不寫 `From` 標頭,Gmail 填已授權信箱 |
+| `GmailOutgoingMessage.Subject` 為 `null` 或空 | 不寫 `Subject` 標頭 |
+| `GmailOutgoingMessage.TextBody` 與 `HtmlBody` 皆 `null` | 一個空的 `text/plain` 部件 |
+| `GmailAttachmentContent.FileName` 空白 / `ContentType` 空白 / `Content` 為 null | `attachment` / `application/octet-stream` / 空陣列 |
+| `GmailMessage.Raw` 為 `null` | `DecodeRaw()` 回 `null`;`GetMessageRawAsync` 回空陣列 |
 | `scopes` 為空序列(`BuildAuthorizationUrl`) | `ArgumentException` |
 | `destination` 不可寫(`DownloadAttachmentAsync`) | `ArgumentException` |
 | `GmailClientOptions.UserId` 為 `null` 或空白 | `me` |
@@ -524,4 +588,5 @@ public class GmailApiException : Exception
 
 - [快速開始](./getting-started.md)
 - [設定](./configuration.md)
+- [升級指南](./migration.md)
 - [版本紀錄](./changelog.md)

@@ -174,7 +174,7 @@ namespace Ozakboy.Gmail.Tests
         }
 
         [Fact]
-        public async Task GetMessageRawAsync_以raw格式取回並交給MimeKit解析()
+        public async Task GetMessageRawAsync_以raw格式取回並解碼成RFC822位元組()
         {
             const string Rfc822 = "From: sender@example.com\r\nTo: receiver@example.com\r\nSubject: 測試主旨\r\n\r\n內文";
             var raw = Convert.ToBase64String(Encoding.UTF8.GetBytes(Rfc822)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
@@ -183,10 +183,22 @@ namespace Ozakboy.Gmail.Tests
             handler.EnqueueJson("{\"id\":\"m1\",\"raw\":\"" + raw + "\"}");
             var client = GmailTestFactory.CreateClient(handler);
 
-            var message = await client.GetMessageRawAsync("m1");
+            var bytes = await client.GetMessageRawAsync("m1");
 
             Assert.Equal(BaseUrl + "messages/m1?format=raw", handler.LastRequest.Url);
-            Assert.Equal("測試主旨", message.Subject);
+            Assert.Equal(Rfc822, Encoding.UTF8.GetString(bytes));
+        }
+
+        [Fact]
+        public async Task GetMessageRawAsync_回應缺raw欄位_回空陣列()
+        {
+            var handler = new RecordingHandler();
+            handler.EnqueueJson("{\"id\":\"m1\"}");
+            var client = GmailTestFactory.CreateClient(handler);
+
+            var bytes = await client.GetMessageRawAsync("m1");
+
+            Assert.Empty(bytes);
         }
 
         [Fact]

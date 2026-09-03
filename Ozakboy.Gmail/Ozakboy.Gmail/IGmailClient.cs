@@ -2,7 +2,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using MimeKit;
 
 namespace Ozakboy.Gmail
 {
@@ -63,15 +62,15 @@ namespace Ozakboy.Gmail
             CancellationToken cancellationToken = default);
 
         /// <summary>
-        /// 以 format=raw 取回郵件,解碼後交給 MimeKit 解析成 <see cref="MimeMessage"/>。
-        /// Fetches the message with format=raw, decodes it and parses it into a <see cref="MimeMessage"/> with MimeKit.
+        /// 以 format=raw 取回郵件,回傳 base64url 解碼後的完整 RFC 822 位元組;可交給任何 MIME 函式庫解析。
+        /// Fetches the message with format=raw and returns the base64url-decoded RFC 822 bytes, ready for any MIME parser.
         /// </summary>
         /// <param name="id">郵件識別碼,null 或空字串時擲出例外。The message id; null or empty throws.</param>
         /// <param name="cancellationToken">取消權杖。Cancellation token.</param>
-        /// <returns>解析後的 MIME 郵件。The parsed MIME message.</returns>
+        /// <returns>RFC 822 郵件位元組;Gmail 沒回傳 raw 時為空陣列。The RFC 822 bytes; an empty array when Gmail returned no raw field.</returns>
         /// <exception cref="System.ArgumentException"><paramref name="id"/> 為 null 或空白時擲出。Thrown when <paramref name="id"/> is null or blank.</exception>
         /// <exception cref="GmailApiException">Gmail 回傳非 2xx 時擲出。Thrown when Gmail answers with a non-2xx status.</exception>
-        Task<MimeMessage> GetMessageRawAsync(string id, CancellationToken cancellationToken = default);
+        Task<byte[]> GetMessageRawAsync(string id, CancellationToken cancellationToken = default);
 
         /// <summary>
         /// 取回指定歷程識別碼之後的信箱變更,用於增量同步。
@@ -234,15 +233,29 @@ namespace Ozakboy.Gmail
         Task<long> DownloadAttachmentAsync(string messageId, string attachmentId, Stream destination, CancellationToken cancellationToken = default);
 
         /// <summary>
-        /// 寄出郵件。郵件會由 MimeKit 序列化後以 message/rfc822 多段上傳,因此只需要 gmail.modify 範圍,不必開 SMTP。
-        /// Sends a message. It is serialised by MimeKit and uploaded as message/rfc822, so the gmail.modify scope is enough and no SMTP connection is needed.
+        /// 寄出郵件。郵件由內建組信器序列化成 RFC 822 後以 message/rfc822 多段上傳,因此只需要 gmail.modify 範圍,不必開 SMTP。
+        /// Sends a message. The built-in writer serialises it to RFC 822 and uploads it as message/rfc822, so the gmail.modify scope is enough and no SMTP connection is needed.
         /// </summary>
         /// <param name="message">要寄出的郵件,null 時擲出例外。The message to send; null throws.</param>
         /// <param name="threadId">要併入的討論串識別碼,null 表示開新討論串。The thread to join; null starts a new thread.</param>
         /// <param name="cancellationToken">取消權杖。Cancellation token.</param>
         /// <returns>已寄出的郵件(含 Id、ThreadId 與 LabelIds)。The sent message, carrying Id, ThreadId and LabelIds.</returns>
         /// <exception cref="System.ArgumentNullException"><paramref name="message"/> 為 null 時擲出。Thrown when <paramref name="message"/> is null.</exception>
+        /// <exception cref="System.InvalidOperationException">郵件沒有收件人或標頭不合法時擲出(見 <see cref="GmailOutgoingMessage.ToRfc822Bytes"/>)。Thrown when the message has no recipients or an invalid header (see <see cref="GmailOutgoingMessage.ToRfc822Bytes"/>).</exception>
         /// <exception cref="GmailApiException">Gmail 回傳非 2xx 時擲出。Thrown when Gmail answers with a non-2xx status.</exception>
-        Task<GmailMessage> SendAsync(MimeMessage message, string? threadId = null, CancellationToken cancellationToken = default);
+        Task<GmailMessage> SendAsync(GmailOutgoingMessage message, string? threadId = null, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// 寄出呼叫端自行組好的 RFC 822 郵件位元組(MimeKit、MailKit、System.Net.Mail 或任何工具產生皆可),原封不動以 message/rfc822 多段上傳。
+        /// Sends RFC 822 bytes composed by the caller (MimeKit, MailKit, System.Net.Mail or anything else), uploaded verbatim as message/rfc822.
+        /// </summary>
+        /// <param name="rfc822">完整的 RFC 822 郵件;null 或空陣列時擲出例外。The complete RFC 822 message; null or empty throws.</param>
+        /// <param name="threadId">要併入的討論串識別碼,null 表示開新討論串。The thread to join; null starts a new thread.</param>
+        /// <param name="cancellationToken">取消權杖。Cancellation token.</param>
+        /// <returns>已寄出的郵件(含 Id、ThreadId 與 LabelIds)。The sent message, carrying Id, ThreadId and LabelIds.</returns>
+        /// <exception cref="System.ArgumentNullException"><paramref name="rfc822"/> 為 null 時擲出。Thrown when <paramref name="rfc822"/> is null.</exception>
+        /// <exception cref="System.ArgumentException"><paramref name="rfc822"/> 為空陣列時擲出。Thrown when <paramref name="rfc822"/> is empty.</exception>
+        /// <exception cref="GmailApiException">Gmail 回傳非 2xx 時擲出。Thrown when Gmail answers with a non-2xx status.</exception>
+        Task<GmailMessage> SendRawAsync(byte[] rfc822, string? threadId = null, CancellationToken cancellationToken = default);
     }
 }
