@@ -1,0 +1,36 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Ozakboy.Gmail">
+  <defs>
+    <linearGradient id="ygBg" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#223148"/>
+      <stop offset="1" stop-color="#111A28"/>
+    </linearGradient>
+    <linearGradient id="ygPaper" x1="64" y1="248" x2="368" y2="448" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F3F7FC"/>
+      <stop offset="1" stop-color="#D9E3F0"/>
+    </linearGradient>
+    <linearGradient id="ygKey" x1="300" y1="60" x2="440" y2="280" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F5C169"/>
+      <stop offset="1" stop-color="#DD9138"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 底板：與 Ozakboy.Mail 同一套深藍圓角方,系列一致 -->
+  <rect width="512" height="512" rx="112" fill="url(#ygBg)"/>
+
+  <!-- 同步軌跡：右上繞到信封的虛線弧,暗示 history 增量同步 -->
+  <path d="M96 200 C 120 120, 200 80, 300 88" stroke="#41597A" stroke-width="12" stroke-linecap="round" stroke-dasharray="4 34" fill="none" opacity="0.85"/>
+
+  <!-- 信封 -->
+  <g>
+    <rect x="64" y="248" width="304" height="200" rx="26" fill="url(#ygPaper)"/>
+    <path d="M64 278 L216 378 L368 278" stroke="#8FA6C4" stroke-width="22" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  </g>
+
+  <!-- 金鑰：OAuth 授權,鑰匙插進信封 -->
+  <g transform="translate(396 100) rotate(35)" stroke="url(#ygKey)" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <circle cx="0" cy="0" r="44" stroke-width="26"/>
+    <path d="M0 44 L0 208" stroke-width="28"/>
+    <path d="M0 140 L42 140" stroke-width="24"/>
+    <path d="M0 186 L34 186" stroke-width="24"/>
+  </g>
+</svg>

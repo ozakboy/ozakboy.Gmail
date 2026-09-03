@@ -1,0 +1,82 @@
+{
+  "header": {
+    "tagline": ".NET Gmail API client"
+  },
+  "nav": {
+    "docs": "Docs",
+    "changelog": "Changelog",
+    "sponsor": "Sponsor"
+  },
+  "home": {
+    "hero": {
+      "title": "Ozakboy.Gmail",
+      "tagline": "Gmail REST and Google OAuth in one thin async client. You keep the tokens; it keeps the HTTP.",
+      "subtitle": "Read Gmail, apply labels, move mail to trash and send it, from a .NET server. For the case where you want to encrypt the tokens and store them in your own database, without pulling the whole Google.Apis authentication stack in to do it.",
+      "install": "Get Started",
+      "github": "View on GitHub"
+    },
+    "features": {
+      "title": "Why it is different",
+      "items": {
+        "noGoogleApis": {
+          "title": "No Google.Apis dependency",
+          "desc": "The client asks you for one thing — a callback that hands it an access token. Where tokens live, how they are encrypted and how tenants are kept apart stays your decision; the package neither stores nor touches them."
+        },
+        "oneScope": {
+          "title": "Sending needs one scope",
+          "desc": "Mail goes out through the REST messages.send endpoint: MimeKit builds the MimeMessage, the client uploads it as multipart. So gmail.modify on its own is enough — no need to ask for full mail.google.com access just to reach SMTP or IMAP."
+        },
+        "errors": {
+          "title": "No parsing error JSON yourself",
+          "desc": "Every non-2xx response becomes a GmailApiException carrying Google's error.reason plus IsHistoryExpired, IsUnauthorized, IsRateLimited and IsNotFound. 429 and 5xx are retried with exponential backoff before you ever see them."
+        },
+        "asyncOnly": {
+          "title": "Async only",
+          "desc": "Every network member returns a Task, ends in Async and takes a CancellationToken. ConfigureAwait(false) all the way down, and cancellation propagates unwrapped."
+        },
+        "targets": {
+          "title": "Five target frameworks",
+          "desc": "netstandard2.0 / 2.1 plus net8.0 / 9.0 / 10.0; netstandard2.0 covers .NET Framework 4.6.1+ as well. The only dependencies are MimeKit, the two Microsoft.Extensions.Configuration packages used for binding, and System.Text.Json on netstandard."
+        },
+        "narrow": {
+          "title": "Deliberately narrow",
+          "desc": "No token storage, no Pub/Sub push notifications, no permanent delete, no IMAP or SMTP, no Google API beyond Gmail — and no opinion about which message is an ad or a scam."
+        }
+      }
+    },
+    "quickstart": {
+      "title": "Print your first mailbox address",
+      "step1": "1. Install the package",
+      "step2": "2. Add your Google OAuth client settings",
+      "step3": "3. Authorize, read, and handle errors"
+    }
+  },
+  "docs": {
+    "title": "Documentation",
+    "intro": "Pick a topic below to get started with Ozakboy.Gmail.",
+    "sections": {
+      "gettingStarted": "Getting Started",
+      "configuration": "Configuration",
+      "api": "API Reference",
+      "changelog": "Changelog"
+    }
+  },
+  "sponsor": {
+    "title": "Sponsor",
+    "intro": "If Ozakboy.Gmail helps you, consider sponsoring the developer via cryptocurrency or Binance Pay.",
+    "crypto": {
+      "title": "Cryptocurrency"
+    },
+    "usdt": {
+      "title": "USDT (BEP20)",
+      "warningTitle": "BSC (Binance Smart Chain / BEP20) network only",
+      "warningBody": "Sending to other networks (ERC20 / TRC20 / Solana, etc.) will result in permanent loss of funds."
+    },
+    "binancePay": {
+      "title": "Binance Pay",
+      "desc": "Scan to sponsor via Binance Pay"
+    },
+    "copy": "Copy",
+    "copied": "Copied ✓"
+  }
+}

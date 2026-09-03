@@ -1,0 +1,82 @@
+{
+  "header": {
+    "tagline": ".NET Gmail API 客戶端"
+  },
+  "nav": {
+    "docs": "文件",
+    "changelog": "更新紀錄",
+    "sponsor": "贊助"
+  },
+  "home": {
+    "hero": {
+      "title": "Ozakboy.Gmail",
+      "tagline": "Gmail REST 與 Google OAuth 合一的薄客戶端。token 你自己管,HTTP 交給它。",
+      "subtitle": "在 .NET 伺服器端讀 Gmail、貼標籤、丟垃圾桶、寄信。token 想自己加密存進資料庫,又不想為了這件事把整套 Google.Apis 認證堆疊拖進專案——這個套件就是為那種情況寫的。",
+      "install": "快速上手",
+      "github": "查看 GitHub"
+    },
+    "features": {
+      "title": "為什麼不一樣",
+      "items": {
+        "noGoogleApis": {
+          "title": "不依賴 Google.Apis",
+          "desc": "client 只跟你要一件事:一個能交出 access token 的 callback。token 存哪、怎麼加密、怎麼分租戶,全是你自己決定,套件不存也不碰。"
+        },
+        "oneScope": {
+          "title": "寄信只要一個 scope",
+          "desc": "寄信走 REST 的 messages.send:用 MimeKit 組好 MimeMessage 再以 multipart 上傳。所以 gmail.modify 一個權限就夠,不必為了 SMTP / IMAP 去要 mail.google.com 的完整權限。"
+        },
+        "errors": {
+          "title": "錯誤不用自己解 JSON",
+          "desc": "所有非 2xx 都是 GmailApiException,帶著 Google 回的 error.reason 與 IsHistoryExpired / IsUnauthorized / IsRateLimited / IsNotFound 四個旗標;429 與 5xx 內建指數退避重試。"
+        },
+        "asyncOnly": {
+          "title": "只做 async",
+          "desc": "每個網路方法都回 Task、都以 Async 結尾、都收 CancellationToken;內部全程 ConfigureAwait(false),取消例外原樣往上丟,不包裝。"
+        },
+        "targets": {
+          "title": "五個目標框架",
+          "desc": "netstandard2.0 / 2.1 與 net8.0 / 9.0 / 10.0 都支援;netstandard2.0 也涵蓋 .NET Framework 4.6.1+。相依只有 MimeKit、設定繫結那兩個 Microsoft.Extensions 套件,netstandard 再加 System.Text.Json。"
+        },
+        "narrow": {
+          "title": "刻意做窄",
+          "desc": "不存 token、不做 Pub/Sub 推播、不做永久刪除、不做 IMAP / SMTP、不碰 Gmail 以外的 Google API,也不幫你判斷哪一封是廣告或詐騙。"
+        }
+      }
+    },
+    "quickstart": {
+      "title": "印出第一個信箱地址",
+      "step1": "1. 安裝套件",
+      "step2": "2. 填入 Google OAuth 用戶端設定",
+      "step3": "3. 授權、讀信、處理錯誤"
+    }
+  },
+  "docs": {
+    "title": "文件",
+    "intro": "從下方主題開始認識 Ozakboy.Gmail。",
+    "sections": {
+      "gettingStarted": "快速上手",
+      "configuration": "設定說明",
+      "api": "API 文件",
+      "changelog": "更新紀錄"
+    }
+  },
+  "sponsor": {
+    "title": "贊助",
+    "intro": "如果 Ozakboy.Gmail 對您有幫助,歡迎透過加密貨幣或 Binance Pay 贊助開發者。",
+    "crypto": {
+      "title": "加密貨幣"
+    },
+    "usdt": {
+      "title": "USDT (BEP20)",
+      "warningTitle": "僅限 BSC (Binance Smart Chain / BEP20) 網路",
+      "warningBody": "匯到其他網路 (ERC20 / TRC20 / Solana 等) 將永久遺失,無法找回。"
+    },
+    "binancePay": {
+      "title": "Binance Pay",
+      "desc": "掃描以透過 Binance Pay 贊助"
+    },
+    "copy": "複製",
+    "copied": "已複製 ✓"
+  }
+}
