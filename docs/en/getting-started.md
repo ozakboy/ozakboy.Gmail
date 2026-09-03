@@ -1,6 +1,6 @@
 ---
 title: Getting Started
-description: Install Ozakboy.Gmail 2.0.0, connect a Gmail account with Google OAuth, and read your first messages.
+description: Install Ozakboy.Gmail 2.1.0, connect a Gmail account with Google OAuth, and read your first messages.
 ---
 
 # Getting Started
@@ -8,7 +8,7 @@ description: Install Ozakboy.Gmail 2.0.0, connect a Gmail account with Google OA
 ## Install
 
 ```bash
-dotnet add package Ozakboy.Gmail --version 2.0.0
+dotnet add package Ozakboy.Gmail --version 2.1.0
 ```
 
 Supported target frameworks: `netstandard2.0`, `netstandard2.1`, `net8.0`, `net9.0`, `net10.0`.
@@ -113,24 +113,24 @@ string email        = identity.Email!;
 
 ## 4. Provide an access token
 
-`GmailClient` calls your provider once per request. A typical provider returns the cached access token and refreshes it a little before `ExpiresAt`:
+`GmailClient` calls your provider once per request. Since 2.1.0 the package ships one: `GoogleAccessTokenProvider` caches the access token, refreshes it two minutes before `ExpiresAt`, makes sure concurrent callers trigger only one refresh, and hands every new token to `OnRefreshed` so you can persist it:
 
 ```csharp
-Func<CancellationToken, Task<string>> provider = async ct =>
+var account = await store.LoadAsync(accountId, ct);
+
+var provider = new GoogleAccessTokenProvider(oauthClient, account.RefreshToken, new GoogleAccessTokenProviderOptions
 {
-    var account = await store.LoadAsync(accountId, ct);
-    if (account.ExpiresAt > DateTimeOffset.UtcNow.AddMinutes(2))
-        return account.AccessToken;
+    InitialAccessToken = account.AccessToken,       // reuse what you have, if it is still valid
+    InitialExpiresAt   = account.ExpiresAt,
+    OnRefreshed        = (token, c) => store.SaveAccessTokenAsync(accountId, token.AccessToken!, token.ExpiresAt, c),
+});
 
-    var refreshed = await oauthClient.RefreshAsync(account.RefreshToken, ct);   // RefreshToken in the response is null — keep yours
-    await store.SaveAccessTokenAsync(accountId, refreshed.AccessToken!, refreshed.ExpiresAt, ct);
-    return refreshed.AccessToken!;
-};
-
-IGmailClient gmail = new GmailClient(httpClient, provider);
+IGmailClient gmail = new GmailClient(httpClient, provider.GetAccessTokenAsync);
 ```
 
-If `RefreshAsync` throws `GmailApiException` with `IsUnauthorized == true`, the refresh token itself has been revoked or has expired — mark the account as needing re-authorization and send the user through step 3 again.
+Keep one provider per connected mailbox for as long as it stays connected. Prefer your own logic? Any `Func<CancellationToken, Task<string>>` still works — the delegate contract has not changed.
+
+If `RefreshAsync` (or the provider) throws `GmailApiException` with `IsUnauthorized == true`, the refresh token itself has been revoked or has expired — mark the account as needing re-authorization and send the user through step 3 again.
 
 ## 5. Read the mailbox
 
@@ -158,6 +158,32 @@ do
 
     pageToken = page.NextPageToken;
 } while (pageToken != null);
+```
+
+One `GetMessageAsync` per message is fine for a handful; for a backfill of hundreds use the batch endpoint (2.1.0) — one HTTP round trip per 50 messages, and a message deleted in the meantime does not fail the batch:
+
+```csharp
+GmailBatchGetResult batch = await gmail.BatchGetMessagesAsync(
+    page.Messages.Select(m => m.Id!),
+    GmailMessageFormat.Metadata,
+    new[] { "From", "Subject", "List-Unsubscribe", "Authentication-Results" },
+    ct);
+
+foreach (GmailMessage message in batch.Messages)
+    Console.WriteLine($"{message.InternalDateTime:u}  {message.GetHeader("From")}  {message.GetHeader("Subject")}");
+
+foreach (GmailBatchFailure failure in batch.Failures.Where(f => f.IsRateLimited))
+    retryQueue.Enqueue(failure.Id!);   // notFound ones are simply gone — skip them
+```
+
+When you do need the content, `GetMessageAsync(id, GmailMessageFormat.Full)` plus the 2.1.0 helpers save you the MIME walk:
+
+```csharp
+GmailMessage full = await gmail.GetMessageAsync(id, GmailMessageFormat.Full, cancellationToken: ct);
+string? text = full.GetTextBody();
+string? html = full.GetHtmlBody();
+foreach (GmailAttachmentInfo info in full.GetAttachments())
+    Console.WriteLine($"{info.FileName} ({info.MimeType}, {info.Size} bytes, attachmentId {info.AttachmentId})");
 ```
 
 ## 6. Sync incrementally

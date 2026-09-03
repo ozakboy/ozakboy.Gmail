@@ -24,10 +24,52 @@ namespace Ozakboy.Gmail
     public class GmailClient : IGmailClient
     {
         /// <summary>
+        /// Gmail REST API 的主機位址(不含路徑)。
+        /// The Gmail REST API host, without any path.
+        /// </summary>
+        private const string ApiHost = "https://gmail.googleapis.com";
+
+        /// <summary>
+        /// Gmail REST API 的路徑前綴(結尾為 users/)。
+        /// The Gmail REST API path prefix, ending in users/.
+        /// </summary>
+        private const string ApiPathPrefix = "/gmail/v1/users/";
+
+        /// <summary>
         /// Gmail REST API 的基底網址(結尾為 users/)。
         /// The Gmail REST API base URL, ending in users/.
         /// </summary>
-        private const string ApiBaseUrl = "https://gmail.googleapis.com/gmail/v1/users/";
+        private const string ApiBaseUrl = ApiHost + ApiPathPrefix;
+
+        /// <summary>
+        /// 批次端點的路徑。
+        /// The batch endpoint path.
+        /// </summary>
+        private const string BatchPath = "/batch/gmail/v1";
+
+        /// <summary>
+        /// 批次端點的網址。所有子請求都包在這一個 multipart/mixed 請求裡。
+        /// The batch endpoint URL; every sub-request travels inside this single multipart/mixed request.
+        /// </summary>
+        private const string BatchUrl = ApiHost + BatchPath;
+
+        /// <summary>
+        /// 批次子回應的 Content-ID 前綴,後面接的數字對應送出的第幾個子請求。
+        /// The Content-ID prefix of a batch sub-response; the number after it is the position of the matching sub-request.
+        /// </summary>
+        private const string BatchResponseItemPrefix = "response-item";
+
+        /// <summary>
+        /// 批次子請求的媒體類型。
+        /// The media type of a batch sub-request.
+        /// </summary>
+        private const string HttpMediaType = "application/http";
+
+        /// <summary>
+        /// 批次每次 HTTP 請求可打包的郵件數上限。
+        /// The largest number of messages one batch HTTP request may carry.
+        /// </summary>
+        private const int MaxBatchSize = 100;
 
         /// <summary>
         /// 寄信用的多段上傳基底網址(結尾為 users/)。
@@ -54,6 +96,12 @@ namespace Ozakboy.Gmail
         private readonly string _userId;
 
         /// <summary>
+        /// 批次取信時每個 HTTP 請求打包幾封郵件。
+        /// How many messages one batch HTTP request carries.
+        /// </summary>
+        private readonly int _batchSize;
+
+        /// <summary>
         /// 以預設設定建立用戶端。
         /// Creates the client with the default options.
         /// </summary>
@@ -73,7 +121,7 @@ namespace Ozakboy.Gmail
         /// <param name="accessTokenProvider">存取權杖提供者,每次呼叫(非每次重試)會被呼叫一次。The access token provider, invoked once per call and not per retry.</param>
         /// <param name="options">重試與信箱設定,null 視同預設值;內容會在此複製一份。Retry and mailbox settings; null means the defaults, and the values are copied here.</param>
         /// <exception cref="ArgumentNullException"><paramref name="httpClient"/> 或 <paramref name="accessTokenProvider"/> 為 null 時擲出。Thrown when <paramref name="httpClient"/> or <paramref name="accessTokenProvider"/> is null.</exception>
-        /// <exception cref="ArgumentOutOfRangeException"><paramref name="options"/> 的 MaxRetries 為負值時擲出。Thrown when MaxRetries on <paramref name="options"/> is negative.</exception>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="options"/> 的 MaxRetries 為負值、MaxRetryDelay 為負值,或 BatchSize 不在 1 到 100 之間時擲出。Thrown when MaxRetries or MaxRetryDelay on <paramref name="options"/> is negative, or BatchSize is outside 1 to 100.</exception>
         public GmailClient(HttpClient httpClient, Func<CancellationToken, Task<string>> accessTokenProvider, GmailClientOptions? options)
         {
             if (httpClient == null)
@@ -86,11 +134,29 @@ namespace Ozakboy.Gmail
             if (maxRetries < 0)
                 throw new ArgumentOutOfRangeException(nameof(options), maxRetries, "MaxRetries 不可為負值。MaxRetries cannot be negative.");
 
+            var maxRetryDelay = options == null ? new GmailClientOptions().MaxRetryDelay : options.MaxRetryDelay;
+            if (maxRetryDelay.HasValue && maxRetryDelay.Value < TimeSpan.Zero)
+                throw new ArgumentOutOfRangeException(nameof(options), maxRetryDelay, "MaxRetryDelay 不可為負值。MaxRetryDelay cannot be negative.");
+
+            var batchSize = options == null ? new GmailClientOptions().BatchSize : options.BatchSize;
+            if (batchSize < 1 || batchSize > MaxBatchSize)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(options),
+                    batchSize,
+                    "BatchSize 必須介於 1 與 100 之間。BatchSize has to be between 1 and 100.");
+            }
+
             var retryBaseDelay = options == null ? new GmailClientOptions().RetryBaseDelay : options.RetryBaseDelay;
+            var retryOnNetworkErrors = options != null && options.RetryOnNetworkErrors;
             var userId = options == null || string.IsNullOrWhiteSpace(options.UserId) ? "me" : options.UserId;
 
+            _batchSize = batchSize;
             _userId = Uri.EscapeDataString(userId);
-            _http = new GmailHttp(httpClient, accessTokenProvider, new RetryPolicy(maxRetries, retryBaseDelay));
+            _http = new GmailHttp(
+                httpClient,
+                accessTokenProvider,
+                new RetryPolicy(maxRetries, retryBaseDelay, maxRetryDelay, retryOnNetworkErrors));
         }
 
         /// <inheritdoc />
@@ -133,16 +199,49 @@ namespace Ozakboy.Gmail
         {
             RequireText(id, nameof(id));
 
-            var parameters = new StringBuilder();
-            AppendParameter(parameters, "format", ToWire(format));
-
-            // metadataHeaders 只有 format=metadata 有意義,其他格式不送
-            // metadataHeaders only means something with format=metadata, so it is not sent otherwise.
-            if (format == GmailMessageFormat.Metadata)
-                AppendParameters(parameters, "metadataHeaders", metadataHeaders);
-
-            var url = BuildUrl("messages/" + Uri.EscapeDataString(id), parameters);
+            var url = BuildUrl("messages/" + Uri.EscapeDataString(id), BuildFormatParameters(format, metadataHeaders));
             return _http.SendForJsonAsync<GmailMessage>(() => new HttpRequestMessage(HttpMethod.Get, url), false, cancellationToken);
+        }
+
+        /// <inheritdoc />
+        public async Task<GmailBatchGetResult> BatchGetMessagesAsync(
+            IEnumerable<string> ids,
+            GmailMessageFormat format = GmailMessageFormat.Full,
+            IEnumerable<string>? metadataHeaders = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (ids == null)
+                throw new ArgumentNullException(nameof(ids));
+
+            var messageIds = new List<string>(ids);
+            var result = new GmailBatchGetResult();
+
+            // 沒有任何郵件就不必送請求
+            // Nothing to fetch means nothing to send.
+            if (messageIds.Count == 0)
+                return result;
+
+            foreach (var messageId in messageIds)
+            {
+                if (string.IsNullOrWhiteSpace(messageId))
+                {
+                    throw new ArgumentException(
+                        "郵件識別碼不可為 null 或空白。A message id cannot be null or blank.",
+                        nameof(ids));
+                }
+            }
+
+            // 查詢字串各段共用,先算一次,順便把 metadataHeaders 固化避免重複列舉
+            // The query string is shared by every chunk, so it is computed once, which also materialises metadataHeaders instead of enumerating it repeatedly.
+            var parameters = BuildFormatParameters(format, metadataHeaders);
+
+            for (var offset = 0; offset < messageIds.Count; offset += _batchSize)
+            {
+                var chunk = messageIds.GetRange(offset, Math.Min(_batchSize, messageIds.Count - offset));
+                await ExecuteBatchChunkAsync(chunk, parameters, result, cancellationToken).ConfigureAwait(false);
+            }
+
+            return result;
         }
 
         /// <summary>
@@ -285,6 +384,61 @@ namespace Ozakboy.Gmail
         }
 
         /// <inheritdoc />
+        public Task<GmailThread> GetThreadAsync(
+            string id,
+            GmailMessageFormat format = GmailMessageFormat.Full,
+            IEnumerable<string>? metadataHeaders = null,
+            CancellationToken cancellationToken = default)
+        {
+            RequireText(id, nameof(id));
+
+            var url = BuildUrl("threads/" + Uri.EscapeDataString(id), BuildFormatParameters(format, metadataHeaders));
+            return _http.SendForJsonAsync<GmailThread>(() => new HttpRequestMessage(HttpMethod.Get, url), false, cancellationToken);
+        }
+
+        /// <inheritdoc />
+        public Task<GmailThread> ModifyThreadAsync(
+            string id,
+            IEnumerable<string>? addLabelIds,
+            IEnumerable<string>? removeLabelIds,
+            CancellationToken cancellationToken = default)
+        {
+            RequireText(id, nameof(id));
+
+            var add = ToOptionalList(addLabelIds);
+            var remove = ToOptionalList(removeLabelIds);
+            if (add == null && remove == null)
+            {
+                throw new ArgumentException(
+                    "addLabelIds 與 removeLabelIds 至少要有一個標籤。At least one label has to be supplied in addLabelIds or removeLabelIds.",
+                    nameof(addLabelIds));
+            }
+
+            var body = GmailJson.Serialize(new GmailModifyLabelsRequest { AddLabelIds = add, RemoveLabelIds = remove });
+            var url = BuildUrl("threads/" + Uri.EscapeDataString(id) + "/modify", null);
+
+            return _http.SendForJsonAsync<GmailThread>(() => CreateJsonRequest(HttpMethod.Post, url, body), false, cancellationToken);
+        }
+
+        /// <inheritdoc />
+        public Task<GmailThread> TrashThreadAsync(string id, CancellationToken cancellationToken = default)
+        {
+            RequireText(id, nameof(id));
+
+            var url = BuildUrl("threads/" + Uri.EscapeDataString(id) + "/trash", null);
+            return _http.SendForJsonAsync<GmailThread>(() => new HttpRequestMessage(HttpMethod.Post, url), false, cancellationToken);
+        }
+
+        /// <inheritdoc />
+        public Task<GmailThread> UntrashThreadAsync(string id, CancellationToken cancellationToken = default)
+        {
+            RequireText(id, nameof(id));
+
+            var url = BuildUrl("threads/" + Uri.EscapeDataString(id) + "/untrash", null);
+            return _http.SendForJsonAsync<GmailThread>(() => new HttpRequestMessage(HttpMethod.Post, url), false, cancellationToken);
+        }
+
+        /// <inheritdoc />
         public async Task<List<GmailLabel>> ListLabelsAsync(CancellationToken cancellationToken = default)
         {
             var url = BuildUrl("labels", null);
@@ -422,6 +576,146 @@ namespace Ozakboy.Gmail
         }
 
         /// <summary>
+        /// 送出一段批次請求並把子回應分類到成功與失敗兩邊。
+        /// Sends one batch chunk and sorts its sub-responses into the successes and the failures.
+        /// </summary>
+        /// <param name="chunk">這一段要取的郵件識別碼。The message ids in this chunk.</param>
+        /// <param name="parameters">共用的查詢字串緩衝區。The shared query string buffer.</param>
+        /// <param name="result">累積結果的容器。The container accumulating the result.</param>
+        /// <param name="cancellationToken">取消權杖。Cancellation token.</param>
+        /// <returns>代表非同步作業的 <see cref="Task"/>。A <see cref="Task"/> representing the operation.</returns>
+        /// <exception cref="GmailApiException">外層請求失敗,或回應不是可解析的 multipart 時擲出。Thrown when the outer request fails, or the response is not parsable multipart.</exception>
+        private async Task ExecuteBatchChunkAsync(
+            List<string> chunk,
+            StringBuilder parameters,
+            GmailBatchGetResult result,
+            CancellationToken cancellationToken)
+        {
+            // 子請求路徑先算好,重試時 factory 才能重建同一份請求
+            // The sub-request paths are fixed up front so the factory can rebuild the very same request on retry.
+            var paths = new List<string>(chunk.Count);
+            foreach (var messageId in chunk)
+                paths.Add(BuildPath("messages/" + Uri.EscapeDataString(messageId), parameters));
+
+            var raw = await _http.SendForRawAsync(() => CreateBatchRequest(paths), cancellationToken).ConfigureAwait(false);
+
+            if (!BatchResponseParser.TryGetBoundary(raw.ContentType, out var boundary))
+            {
+                throw CreateBatchParseException(
+                    "批次回應的 Content-Type 沒有 multipart boundary,無法解析。The batch response's Content-Type carries no multipart boundary, so it cannot be parsed.",
+                    raw);
+            }
+
+            var parts = BatchResponseParser.Parse(raw.Body, boundary);
+            if (parts.Count != chunk.Count)
+            {
+                throw CreateBatchParseException(
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "批次回應的部件數({0})與送出的郵件數({1})不符。The batch response has {0} parts but {1} messages were requested.",
+                        parts.Count,
+                        chunk.Count),
+                    raw);
+            }
+
+            for (var i = 0; i < parts.Count; i++)
+            {
+                var part = parts[i];
+                var index = ResolveBatchIndex(part.ContentId, i, chunk.Count);
+
+                if (part.StatusCode >= 200 && part.StatusCode <= 299)
+                {
+                    var message = string.IsNullOrWhiteSpace(part.Body)
+                        ? new GmailMessage()
+                        : GmailJson.Deserialize<GmailMessage>(part.Body) ?? new GmailMessage();
+
+                    result.Messages.Add(message);
+                    continue;
+                }
+
+                // 子部件的限流與 5xx 刻意不自動重試,交由呼叫端依 IsRateLimited 決定要不要重排
+                // A rate-limited or 5xx sub-response is deliberately not retried here; IsRateLimited lets the caller decide whether to requeue it.
+                var error = GoogleErrorBody.Parse(part.Body);
+                result.Failures.Add(new GmailBatchFailure
+                {
+                    Id = chunk[index],
+                    StatusCode = part.StatusCode,
+                    Reason = error.Reason,
+                    ErrorMessage = error.ErrorMessage,
+                });
+            }
+        }
+
+        /// <summary>
+        /// 建立批次請求:multipart/mixed,每個部件是一段 application/http 的 GET 子請求。
+        /// Builds the batch request: multipart/mixed whose every part is an application/http GET sub-request.
+        /// </summary>
+        /// <param name="paths">子請求的路徑加查詢字串。The path plus query string of every sub-request.</param>
+        /// <returns>可送出的請求。The request, ready to be sent.</returns>
+        private static HttpRequestMessage CreateBatchRequest(List<string> paths)
+        {
+            var content = new MultipartContent("mixed");
+
+            for (var i = 0; i < paths.Count; i++)
+            {
+                // 子請求本身沒有 Authorization,權杖只掛在外層請求上
+                // A sub-request carries no Authorization of its own; the token is attached to the outer request only.
+                var part = new StringContent("GET " + paths[i] + " HTTP/1.1\r\n\r\n", Encoding.UTF8);
+                part.Headers.ContentType = new MediaTypeHeaderValue(HttpMediaType);
+                part.Headers.TryAddWithoutValidation(
+                    "Content-ID",
+                    "<item" + i.ToString(CultureInfo.InvariantCulture) + ">");
+
+                content.Add(part);
+            }
+
+            return new HttpRequestMessage(HttpMethod.Post, BatchUrl) { Content = content };
+        }
+
+        /// <summary>
+        /// 由部件的 Content-ID(<c>response-item{i}</c>)對回第幾個郵件識別碼;沒有或格式不符時退回部件順序。
+        /// Maps a part's Content-ID (<c>response-item{i}</c>) back to a message id index, falling back to the part's own position when it is missing or malformed.
+        /// </summary>
+        /// <param name="contentId">部件的 Content-ID,可為 null。The part's Content-ID; may be null.</param>
+        /// <param name="fallback">退回時使用的部件順序。The part position used as the fallback.</param>
+        /// <param name="count">這一段的郵件數。How many messages this chunk holds.</param>
+        /// <returns>郵件識別碼的索引。The index into the chunk's message ids.</returns>
+        private static int ResolveBatchIndex(string? contentId, int fallback, int count)
+        {
+            if (contentId == null)
+                return fallback;
+
+            var trimmed = contentId.Trim();
+            if (!trimmed.StartsWith(BatchResponseItemPrefix, StringComparison.OrdinalIgnoreCase))
+                return fallback;
+
+            var suffix = trimmed.Substring(BatchResponseItemPrefix.Length);
+            if (int.TryParse(suffix, NumberStyles.Integer, CultureInfo.InvariantCulture, out var index) && index >= 0 && index < count)
+                return index;
+
+            return fallback;
+        }
+
+        /// <summary>
+        /// 建立批次回應無法解析時的例外,狀態碼沿用外層回應。
+        /// Builds the exception thrown when a batch response cannot be parsed; the status code is the outer response's.
+        /// </summary>
+        /// <param name="message">說明無法解析的原因。An explanation of why it could not be parsed.</param>
+        /// <param name="raw">外層回應的原始內容。The raw content of the outer response.</param>
+        /// <returns>組裝完成的例外。The assembled exception.</returns>
+        private static GmailApiException CreateBatchParseException(string message, GmailRawResponse raw)
+        {
+            return new GmailApiException(
+                raw.StatusCode,
+                "batchParseError",
+                message,
+                string.IsNullOrEmpty(raw.Body) ? null : raw.Body,
+                "POST",
+                BatchPath,
+                false);
+        }
+
+        /// <summary>
         /// 建立寄信用的多段上傳請求:第一段是 JSON 中繼資料,第二段是 message/rfc822 內容。
         /// Builds the multipart upload request used for sending: a JSON metadata part followed by the message/rfc822 content.
         /// </summary>
@@ -483,6 +777,26 @@ namespace Ozakboy.Gmail
             }
 
             return request;
+        }
+
+        /// <summary>
+        /// 組出 messages.get / threads.get 共用的查詢字串:format 一律送,metadataHeaders 只在 metadata 格式下送。
+        /// Builds the query string shared by messages.get and threads.get: format is always sent, metadataHeaders only under the metadata format.
+        /// </summary>
+        /// <param name="format">要回傳多少內容。How much content to return.</param>
+        /// <param name="metadataHeaders">要限制的標頭名稱,可為 null。The headers to limit the result to; may be null.</param>
+        /// <returns>查詢字串緩衝區。The query string buffer.</returns>
+        private static StringBuilder BuildFormatParameters(GmailMessageFormat format, IEnumerable<string>? metadataHeaders)
+        {
+            var parameters = new StringBuilder();
+            AppendParameter(parameters, "format", ToWire(format));
+
+            // metadataHeaders 只有 format=metadata 有意義,其他格式不送
+            // metadataHeaders only means something with format=metadata, so it is not sent otherwise.
+            if (format == GmailMessageFormat.Metadata)
+                AppendParameters(parameters, "metadataHeaders", metadataHeaders);
+
+            return parameters;
         }
 
         /// <summary>
@@ -613,8 +927,20 @@ namespace Ozakboy.Gmail
         /// <returns>絕對網址。The absolute URL.</returns>
         private string BuildUrl(string relativePath, StringBuilder? parameters)
         {
+            return ApiHost + BuildPath(relativePath, parameters);
+        }
+
+        /// <summary>
+        /// 組出 Gmail API 的路徑加查詢字串(不含主機),batch 的子請求需要這種相對形式。
+        /// Builds the Gmail API path plus query string without the host, which is the form a batch sub-request needs.
+        /// </summary>
+        /// <param name="relativePath">users/{userId}/ 之後的路徑。The path after users/{userId}/.</param>
+        /// <param name="parameters">查詢字串緩衝區,可為 null。The query string buffer; may be null.</param>
+        /// <returns>路徑加查詢字串。The path plus query string.</returns>
+        private string BuildPath(string relativePath, StringBuilder? parameters)
+        {
             var query = parameters == null ? string.Empty : parameters.ToString();
-            return ApiBaseUrl + _userId + "/" + relativePath + query;
+            return ApiPathPrefix + _userId + "/" + relativePath + query;
         }
     }
 }

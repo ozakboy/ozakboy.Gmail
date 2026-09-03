@@ -1,0 +1,47 @@
+name: Build and test
+
+# 五個 TFM 建置 + net10.0 / net48 測試。net48 需要 Windows runner(.NET Framework 4.8 內建於 windows-latest)。
+# Builds all five TFMs and runs the tests on net10.0 and net48. net48 needs a Windows runner (4.8 ships with windows-latest).
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'site/**'
+      - 'docs/**'
+      - '**/*.md'
+      - '.github/workflows/deploy-site.yml'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore Ozakboy.Gmail/Ozakboy.Gmail.sln
+
+      - name: Build (Release, warnings as errors for the library)
+        run: dotnet build Ozakboy.Gmail/Ozakboy.Gmail.sln -c Release --no-restore -p:TreatWarningsAsErrors=true
+
+      - name: Test (net10.0 + net48)
+        run: dotnet test Ozakboy.Gmail/Ozakboy.Gmail.sln -c Release --no-build --logger "trx;LogFileName=results.trx"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: '**/TestResults/*.trx'
+          if-no-files-found: ignore

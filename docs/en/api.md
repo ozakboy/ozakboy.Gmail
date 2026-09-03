@@ -1,6 +1,6 @@
 ---
 title: API Reference
-description: Complete public API of Ozakboy.Gmail 2.0.0 — GmailClient, GoogleOAuthClient, models, options and the GmailApiException error contract.
+description: Complete public API of Ozakboy.Gmail 2.1.0 — GmailClient, GoogleOAuthClient, models, options and the GmailApiException error contract.
 ---
 
 # API Reference
@@ -9,14 +9,14 @@ description: Complete public API of Ozakboy.Gmail 2.0.0 — GmailClient, GoogleO
 
 Ozakboy.Gmail is a thin, async-only client for the [Gmail REST API](https://developers.google.com/workspace/gmail/api/reference/rest) plus the Google OAuth 2.0 token endpoints. It does **not** depend on `Google.Apis.*`, does not store tokens, does not open SMTP or IMAP connections, and (since 2.0.0) pulls in no MIME library — outgoing mail is composed by a built-in RFC 822 writer or handed over as raw bytes. Sending goes through `messages.send`, so the single `gmail.modify` scope is enough.
 
-Items marked **(beyond the draft)** were not in the original 1.0.0 package specification and were added because a first consumer needs them. Members marked **(2.0.0)** replaced the MimeKit-typed members of 1.0.0 — see [Migration](./migration.md).
+Items marked **(beyond the draft)** were not in the original 1.0.0 package specification and were added because a first consumer needs them. Members marked **(2.0.0)** replaced the MimeKit-typed members of 1.0.0 — see [Migration](./migration.md). Members marked **(2.1.0)** are additive.
 
 ## Namespaces
 
 | Namespace | Contents |
 |---|---|
-| `Ozakboy.Gmail` | `IGmailClient`, `GmailClient`, `GmailClientOptions`, `GmailApiException`, `GmailScopes`, `GmailSystemLabels`, `GmailOutgoingMessage`, `GmailAddress`, `GmailAttachmentContent`, and every `Gmail*` model |
-| `Ozakboy.Gmail.OAuth` | `IGoogleOAuthClient`, `GoogleOAuthClient`, `GoogleOAuthOptions`, `GoogleAuthorizationUrlOptions`, `GoogleTokenResponse`, `GoogleIdTokenPayload` |
+| `Ozakboy.Gmail` | `IGmailClient`, `GmailClient`, `GmailClientOptions`, `GmailApiException`, `GmailScopes`, `GmailSystemLabels`, `GmailOutgoingMessage`, `GmailAddress`, `GmailAttachmentContent`, `GmailBatchGetResult`, `GmailBatchFailure`, `GmailThread`, `GmailAttachmentInfo`, and every `Gmail*` model |
+| `Ozakboy.Gmail.OAuth` | `IGoogleOAuthClient`, `GoogleOAuthClient`, `GoogleOAuthOptions`, `GoogleAuthorizationUrlOptions`, `GoogleTokenResponse`, `GoogleIdTokenPayload`, `GoogleAccessTokenProvider`, `GoogleAccessTokenProviderOptions` |
 | `Ozakboy.Gmail.Core` | Internal HTTP / JSON / base64url plumbing. Not part of the public API — do not take a dependency on it. |
 
 ## Conventions that apply everywhere
@@ -24,7 +24,7 @@ Items marked **(beyond the draft)** were not in the original 1.0.0 package speci
 - **Async only.** Every network member returns `Task` / `Task<T>`, ends in `Async`, and takes a trailing `CancellationToken cancellationToken = default`. There are no synchronous counterparts.
 - **`ConfigureAwait(false)`** on every internal `await`; the library never captures a synchronization context.
 - **Cancellation is never wrapped.** `OperationCanceledException` propagates unchanged.
-- **Non-2xx is always `GmailApiException`** — see [Exceptions](#exceptions). Network-level failures (`HttpRequestException`) propagate unchanged and are not retried.
+- **Non-2xx is always `GmailApiException`** — see [Exceptions](#exceptions). Network-level failures (`HttpRequestException`) propagate unchanged; they are retried only when `GmailClientOptions.RetryOnNetworkErrors` is on.
 - **User id is always `me`** (overridable through `GmailClientOptions.UserId`).
 - **Models are plain classes** with public get/set properties, property names aligned to the Gmail REST field names in PascalCase. Absent JSON fields stay `null`; list-typed properties are never `null` (they default to an empty list).
 - **Ids are strings.** `historyId`, `internalDate` and similar int64/uint64 fields that Gmail serialises as strings are exposed as `string` (`HistoryId`) or `long` (`InternalDate`, `Size*`) exactly as documented below.
@@ -86,6 +86,13 @@ public interface IGmailClient
     Task<GmailLabel> UpdateLabelAsync(string id, string? name = null, GmailLabelOptions? options = null, CancellationToken cancellationToken = default);   // (beyond the draft)
     Task DeleteLabelAsync(string id, CancellationToken cancellationToken = default);                                                                    // (beyond the draft)
 
+    Task<GmailBatchGetResult> BatchGetMessagesAsync(IEnumerable<string> ids, GmailMessageFormat format = GmailMessageFormat.Full, IEnumerable<string>? metadataHeaders = null, CancellationToken cancellationToken = default);   // (2.1.0)
+
+    Task<GmailThread> GetThreadAsync(string id, GmailMessageFormat format = GmailMessageFormat.Full, IEnumerable<string>? metadataHeaders = null, CancellationToken cancellationToken = default);   // (2.1.0)
+    Task<GmailThread> ModifyThreadAsync(string id, IEnumerable<string>? addLabelIds, IEnumerable<string>? removeLabelIds, CancellationToken cancellationToken = default);                             // (2.1.0)
+    Task<GmailThread> TrashThreadAsync(string id, CancellationToken cancellationToken = default);                                                                                                    // (2.1.0)
+    Task<GmailThread> UntrashThreadAsync(string id, CancellationToken cancellationToken = default);                                                                                                  // (2.1.0)
+
     Task<GmailAttachment> GetAttachmentAsync(string messageId, string attachmentId, CancellationToken cancellationToken = default);
     Task<long> DownloadAttachmentAsync(string messageId, string attachmentId, Stream destination, CancellationToken cancellationToken = default);
 
@@ -117,9 +124,12 @@ The instance holds no per-call state, so it is safe to register as a singleton.
 ```csharp
 public class GmailClientOptions
 {
-    public int      MaxRetries     { get; set; } = 3;
-    public TimeSpan RetryBaseDelay { get; set; } = TimeSpan.FromSeconds(1);
-    public string   UserId         { get; set; } = "me";
+    public int       MaxRetries           { get; set; } = 3;
+    public TimeSpan  RetryBaseDelay       { get; set; } = TimeSpan.FromSeconds(1);
+    public TimeSpan? MaxRetryDelay        { get; set; } = TimeSpan.FromSeconds(60);   // (2.1.0)
+    public bool      RetryOnNetworkErrors { get; set; }                                // (2.1.0) default false
+    public int       BatchSize            { get; set; } = 50;                          // (2.1.0) 1..100
+    public string    UserId               { get; set; } = "me";
 }
 ```
 
@@ -127,6 +137,9 @@ public class GmailClientOptions
 |---|---|
 | `MaxRetries` | How many times a request is **re-sent** after a retryable failure (HTTP 429, any 5xx, or 403 with reason `rateLimitExceeded` / `userRateLimitExceeded`). `3` means up to four attempts in total. `0` disables retries. Negative values throw `ArgumentOutOfRangeException` when the client is constructed. |
 | `RetryBaseDelay` | Delay before the first retry; doubled on every subsequent retry (1s → 2s → 4s with the defaults). When the response carries a `Retry-After` header, that value is used instead of the computed delay for that attempt. `TimeSpan.Zero` makes tests run without waiting. |
+| `MaxRetryDelay` **(2.1.0)** | Longest delay the client will wait before a retry. When the computed backoff or a `Retry-After` header exceeds it, no retry is attempted and `GmailApiException` is thrown immediately with `RetryAfter` set. `null` removes the cap; negative throws `ArgumentOutOfRangeException`. |
+| `RetryOnNetworkErrors` **(2.1.0)** | When `true`, an `HttpRequestException` from the underlying `HttpClient` (connection reset, DNS, TLS) is retried with the same backoff. After the retries are exhausted the **last `HttpRequestException` propagates unchanged** — it is never wrapped in `GmailApiException`. Cancellation is never retried. |
+| `BatchSize` **(2.1.0)** | How many messages `BatchGetMessagesAsync` puts into one HTTP request (1–100; Google recommends ≤ 50). Larger id lists are chunked automatically. |
 | `UserId` | The `{userId}` path segment. Leave as `me` unless you are a domain-wide-delegated service account. |
 
 Retries apply to every Gmail call **and** to the OAuth token / revoke calls. A request is never retried after a 401, 404, 400 or any other non-retryable status.
@@ -150,6 +163,10 @@ Retries apply to every Gmail call **and** to the OAuth token / revoke calls. A r
 | `DeleteLabelAsync` **(beyond the draft)** | `DELETE users/{userId}/labels/{id}` | Deletes a **user** label; the label is removed from every message it was applied to. System labels cannot be deleted (Gmail returns 400). |
 | `GetAttachmentAsync` | `GET …/messages/{messageId}/attachments/{attachmentId}` | `GmailAttachment` with the **already-decoded** bytes in `Data` and Gmail's `Size`. Gmail returns attachments as base64url inside a JSON body, so the whole attachment is buffered in memory once — there is no true streaming on the wire. |
 | `DownloadAttachmentAsync` | same | Decodes and writes the bytes into `destination`, returns the number of bytes written. Meant for proxying a download into an HTTP response without touching disk. `destination` must be writable; the stream is **not** closed or flushed for you. |
+| `BatchGetMessagesAsync` **(2.1.0)** | `POST batch/gmail/v1` (`multipart/mixed`) | Fetches many messages in one round trip — the backfill workhorse. `ids` are chunked by `BatchSize`, chunks are sent sequentially, and every sub-request carries the same `format` / `metadataHeaders` as `GetMessageAsync`. Returns [`GmailBatchGetResult`](#28-batch-results-threads-and-attachment-info-210): successfully fetched messages in `Messages`, per-id problems (a message deleted between list and get, a per-item rate limit) in `Failures` — the batch as a whole does **not** throw for those. HTTP-level failures of the batch request itself (401, 429, 5xx) follow the normal `GmailApiException` / retry rules; a response the client cannot map back to the ids throws `GmailApiException` with `Reason == "batchParseError"`. Empty `ids` sends nothing. |
+| `GetThreadAsync` **(2.1.0)** | `GET users/{userId}/threads/{id}` | The whole conversation as a `GmailThread` — `Messages` holds every message in the thread, in Gmail's order, with the same `format` / `metadataHeaders` semantics as `GetMessageAsync`. |
+| `ModifyThreadAsync` **(2.1.0)** | `POST …/threads/{id}/modify` | Adds / removes labels on **every** message in the thread. Same validation as `ModifyLabelsAsync`. |
+| `TrashThreadAsync` / `UntrashThreadAsync` **(2.1.0)** | `POST …/threads/{id}/trash` / `untrash` | Trash or restore the whole thread. |
 | `SendAsync` **(2.0.0)** | `POST upload/gmail/v1/users/{userId}/messages/send?uploadType=multipart` | The sent `GmailMessage` (`Id`, `ThreadId`, `LabelIds`). The [`GmailOutgoingMessage`](#27-outgoing-mail--gmailoutgoingmessage-gmailaddress-gmailattachmentcontent) is serialised by the built-in RFC 822 writer (`ToRfc822Bytes()`) and uploaded as `message/rfc822` in a multipart request, so the 35 MB upload limit applies rather than the JSON `raw` limit. `threadId` makes the message part of an existing thread — for a reply, also set `InReplyTo` and `References`, or Gmail will not thread it. |
 | `SendRawAsync` **(2.0.0)** | same | Same upload, but you supply the RFC 822 bytes yourself — from MimeKit, MailKit, `System.Net.Mail` or anything else. `rfc822` `null` → `ArgumentNullException`, empty → `ArgumentException`. |
 
@@ -204,6 +221,9 @@ public class GmailMessage
     public DateTimeOffset? InternalDateTime { get; }       // InternalDate converted; null when 0
     public string? GetHeader(string name);                  // case-insensitive lookup in Payload.Headers; null when absent
     public byte[]? DecodeRaw();                              // (2.0.0) Raw base64url-decoded; null when Raw is null
+    public string? GetTextBody();                            // (2.1.0) first text/plain part that is not an attachment, decoded; null when none
+    public string? GetHtmlBody();                            // (2.1.0) first text/html part that is not an attachment, decoded; null when none
+    public List<GmailAttachmentInfo> GetAttachments();       // (2.1.0) every attachment part; never null
 }
 
 public class GmailMessagePart
@@ -233,6 +253,8 @@ public class GmailMessagePartBody
     public byte[]? DecodeData();                 // null when Data is null
 }
 ```
+
+`GetTextBody()` / `GetHtmlBody()` walk the parts Gmail already split (depth-first, `Payload` included), skip parts that carry a `Filename`, and return the first matching body decoded from base64url as UTF-8 — Gmail hands bodies over in UTF-8 whatever the original charset. `GetAttachments()` collects every part that has a `Filename` or an `AttachmentId`, inline images included; see [`GmailAttachmentInfo`](#28-batch-results-threads-and-attachment-info-210).
 
 `GetHeader` is the helper you will reach for most: `message.GetHeader("List-Unsubscribe")`, `message.GetHeader("Authentication-Results")`. It only searches the top-level payload headers — exactly what `format=Metadata` returns.
 
@@ -394,6 +416,47 @@ public class GmailOutgoingMessage
 
 **Throws** (`ToRfc822Bytes()` and therefore `SendAsync`): `InvalidOperationException` when `To`, `Cc` and `Bcc` are all empty, when an extra header clashes with a generated one (case-insensitive), or when `InReplyTo` / `References` / a header value contains CR or LF.
 
+### 2.8 Batch results, threads and attachment info (2.1.0)
+
+```csharp
+public class GmailBatchGetResult
+{
+    public List<GmailMessage>      Messages { get; }   // never null — the messages that came back 2xx
+    public List<GmailBatchFailure> Failures { get; }   // never null — one entry per id that did not
+}
+
+public class GmailBatchFailure
+{
+    public string? Id            { get; set; }   // the id you asked for
+    public int     StatusCode    { get; set; }   // the sub-response status
+    public string? Reason        { get; set; }   // Google error.errors[0].reason, e.g. "notFound"
+    public string? ErrorMessage  { get; set; }
+    public bool    IsNotFound    { get; }        // 404 — deleted between list and get; skip it
+    public bool    IsRateLimited { get; }        // 429, or 403 rateLimitExceeded / userRateLimitExceeded — retry those ids later
+}
+
+public class GmailThread
+{
+    public string?            Id        { get; set; }
+    public string?            HistoryId { get; set; }
+    public string?            Snippet   { get; set; }
+    public List<GmailMessage> Messages  { get; set; }   // never null
+}
+
+public class GmailAttachmentInfo
+{
+    public string?           PartId       { get; set; }
+    public string?           FileName     { get; set; }
+    public string?           MimeType     { get; set; }
+    public long              Size         { get; set; }   // Body.Size
+    public string?           AttachmentId { get; set; }   // set for attachments Gmail stores separately → GetAttachmentAsync; null when the bytes are inline in Part.Body.Data
+    public string?           ContentId    { get; set; }   // Content-ID header without the angle brackets; set for inline (cid:) images
+    public GmailMessagePart? Part         { get; set; }   // the original part
+}
+```
+
+Batch sub-failures are deliberately **not** retried by the client: a `notFound` will never succeed, and a per-item rate limit is better handled by re-queuing those ids at the job level than by stalling the whole batch.
+
 ---
 
 ## 3. `IGoogleOAuthClient` / `GoogleOAuthClient` (`Ozakboy.Gmail.OAuth`)
@@ -497,6 +560,50 @@ public class GoogleIdTokenPayload
 
 `Parse` base64url-decodes the JWT payload segment and reads the standard claims. **It does not verify the signature.** That is safe only for a token you just received directly from Google's token endpoint over TLS (the `IdToken` of a `GoogleTokenResponse`) — do not use it to validate a token handed to you by a browser or a third party. A `null` or blank token throws `ArgumentException`; anything else that is not a JWT throws `FormatException`.
 
+### 3.6 `GoogleAccessTokenProvider` (2.1.0)
+
+```csharp
+public class GoogleAccessTokenProviderOptions
+{
+    public string?         InitialAccessToken { get; set; }                              // use a token you already have…
+    public DateTimeOffset? InitialExpiresAt   { get; set; }                              // …but only when both are set
+    public TimeSpan        RefreshSkew        { get; set; } = TimeSpan.FromMinutes(2);   // refresh this long before ExpiresAt; negative throws
+    public Func<GoogleTokenResponse, CancellationToken, Task>? OnRefreshed { get; set; } // persist the new token here
+}
+
+public class GoogleAccessTokenProvider
+{
+    public GoogleAccessTokenProvider(IGoogleOAuthClient oauthClient, string refreshToken, GoogleAccessTokenProviderOptions? options = null);
+
+    public string?         CurrentAccessToken { get; }   // cached token, null before the first refresh
+    public DateTimeOffset? ExpiresAt          { get; }
+    public Task<string> GetAccessTokenAsync(CancellationToken cancellationToken = default);
+    public void Invalidate();                            // drop the cache; the next call refreshes
+}
+```
+
+The ready-made access-token provider for one mailbox: hand it the refresh token and pass `provider.GetAccessTokenAsync` to `GmailClient`.
+
+```csharp
+var provider = new GoogleAccessTokenProvider(oauthClient, refreshToken, new GoogleAccessTokenProviderOptions
+{
+    InitialAccessToken = account.AccessToken,
+    InitialExpiresAt   = account.ExpiresAt,
+    OnRefreshed        = (token, ct) => store.SaveAccessTokenAsync(account.Id, token.AccessToken!, token.ExpiresAt, ct),
+});
+
+IGmailClient gmail = new GmailClient(httpClient, provider.GetAccessTokenAsync);
+```
+
+| Behaviour | Detail |
+|---|---|
+| Caching | The access token is kept in memory and returned without a network call while `ExpiresAt - RefreshSkew` is still in the future. |
+| Refreshing | Otherwise `RefreshAsync(refreshToken)` is called, the cache is updated, then `OnRefreshed` is awaited (an exception from it propagates, but the cache is already updated). |
+| Concurrency | Refreshes are serialised: twenty concurrent callers on an expired token produce **one** token request; the others wait and receive the same token. |
+| Failure | An exception from `RefreshAsync` — typically `GmailApiException` with `IsUnauthorized` when the refresh token is dead — propagates unchanged and leaves the cache untouched. |
+| Storage | Nothing is written anywhere. The refresh token lives in a private field for the lifetime of the provider; persisting the access token is what `OnRefreshed` is for. |
+| Lifetime | One provider per mailbox; it is thread-safe, so keep it for as long as the account is connected. |
+
 ---
 
 ## Exceptions
@@ -505,7 +612,7 @@ public class GoogleIdTokenPayload
 |---|---|
 | `GmailApiException` | Any HTTP response outside 2xx from Gmail **or** the Google OAuth endpoints, after retries are exhausted. |
 | `OperationCanceledException` | The `CancellationToken` was cancelled. Propagates unwrapped, even mid-retry-delay. |
-| `HttpRequestException` | Network / DNS / TLS failure before a response was received. Propagates unwrapped and is not retried. |
+| `HttpRequestException` | Network / DNS / TLS failure before a response was received. Propagates unwrapped; retried only with `RetryOnNetworkErrors`, and even then the last one propagates unwrapped. |
 | `ArgumentNullException` / `ArgumentException` / `ArgumentOutOfRangeException` | Invalid arguments, thrown **before** any request is sent (null ids, empty label lists, more than 1000 batch ids, negative `MaxRetries`, empty `ClientId`…). |
 | `InvalidOperationException` | `accessTokenProvider` returned `null` or an empty string; or `GmailOutgoingMessage.ToRfc822Bytes()` / `SendAsync` found no recipients, a clashing extra header, or CR / LF in a header value. |
 | `FormatException` | `GoogleIdTokenPayload.Parse` received something that is not a JWT. |
@@ -525,6 +632,7 @@ public class GmailApiException : Exception
     public bool    IsHistoryExpired { get; }   // 404 from ListHistoryAsync → the startHistoryId is too old, rescan by time window
     public bool    IsRateLimited    { get; }   // 429, or 403 with reason rateLimitExceeded / userRateLimitExceeded
     public bool    IsNotFound       { get; }   // 404 that is not IsHistoryExpired (message deleted, label gone…)
+    public TimeSpan? RetryAfter     { get; }   // (2.1.0) the Retry-After of the final failed response; null when absent
 }
 ```
 
@@ -534,7 +642,7 @@ public class GmailApiException : Exception
 
 - `IsUnauthorized` → mark the account as needing re-authorization and stop calling until the user re-consents. A refreshed access token would not help: for Gmail 401 the provider already supplied its best token, and for OAuth `invalid_grant` the refresh token itself is dead.
 - `IsHistoryExpired` → discard the stored history id, rescan with `ListMessagesAsync("newer_than:…")`, then store the `HistoryId` from `GetProfileAsync`.
-- `IsRateLimited` → the client already retried `MaxRetries` times with backoff; back off at the job level.
+- `IsRateLimited` → the client already retried `MaxRetries` times with backoff (or gave up early because `Retry-After` exceeded `MaxRetryDelay`); back off at the job level, using `RetryAfter` when it is set.
 - `IsNotFound` from `GetMessageAsync` → the message was deleted between listing and fetching; skip it.
 
 ### Retry policy
@@ -545,9 +653,9 @@ public class GmailApiException : Exception
 | 500, 502, 503, 504 (any 5xx) | yes | honours `Retry-After` when present |
 | 403 with reason `rateLimitExceeded` / `userRateLimitExceeded` | yes | Gmail's per-user quota errors come back as 403, not 429 |
 | 401, 400, 403 (other reasons), 404, 409, 412 … | no | surfaced immediately |
-| `HttpRequestException` | no | surfaced immediately |
+| `HttpRequestException` | only with `RetryOnNetworkErrors` | otherwise surfaced immediately |
 
-Delays are `RetryBaseDelay × 2^(attempt-1)`, so 1s, 2s, 4s by default. The `accessTokenProvider` is **not** called again for a retry; the same token is reused.
+Delays are `RetryBaseDelay × 2^(attempt-1)`, so 1s, 2s, 4s by default, capped by `MaxRetryDelay` (60 s by default) — a delay above the cap ends the retry loop immediately and the exception carries the `Retry-After` value in `RetryAfter`. The `accessTokenProvider` is **not** called again for a retry; the same token is reused.
 
 ---
 
@@ -566,6 +674,12 @@ Delays are `RetryBaseDelay × 2^(attempt-1)`, so 1s, 2s, 4s by default. The `acc
 | Any required string argument (`id`, `messageId`, `attachmentId`, `name`, `code`, `refreshToken`, `token`, `redirectUri`, `state`, `startHistoryId`) is `null` or empty | `ArgumentException` |
 | `message` (`SendAsync`), `rfc822` (`SendRawAsync`), `destination` (`DownloadAttachmentAsync`) or `scopes` (`BuildAuthorizationUrl`) is `null` | `ArgumentNullException` |
 | `rfc822` is empty (`SendRawAsync`) | `ArgumentException` |
+| `ids` is `null` (`BatchGetMessagesAsync`) | `ArgumentNullException` |
+| `ids` is empty (`BatchGetMessagesAsync`) | No request sent; empty result |
+| An element of `ids` is `null` or blank | `ArgumentException` |
+| `MaxRetryDelay` is `null` | No cap on retry delays |
+| `InitialAccessToken` **or** `InitialExpiresAt` is `null` (`GoogleAccessTokenProviderOptions`) | Treated as no cached token; the first call refreshes |
+| `GmailMessage.Payload` is `null` | `GetTextBody()` / `GetHtmlBody()` return `null`; `GetAttachments()` returns an empty list |
 | `GmailOutgoingMessage.From` is `null` | No `From` header; Gmail fills in the authenticated mailbox |
 | `GmailOutgoingMessage.Subject` is `null` or empty | No `Subject` header |
 | `GmailOutgoingMessage.TextBody` and `HtmlBody` both `null` | An empty `text/plain` part |

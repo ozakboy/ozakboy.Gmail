@@ -26,8 +26,11 @@ namespace Ozakboy.Gmail.Tests.TestSupport
         /// <summary>送出請求時的回呼,用來在測試中製造取消等情境。</summary>
         public Action<HttpRequestMessage> OnRequest { get; set; }
 
-        /// <summary>設定後,每次送出請求都會擲出這個例外(用來驗證網路層例外不被包裝)。</summary>
+        /// <summary>設定後,送出請求時會擲出這個例外(用來驗證網路層例外不被包裝)。</summary>
         public Exception ThrowOnSend { get; set; }
+
+        /// <summary>ThrowOnSend 最多對前幾次請求生效,預設無限次;設成 1 就只有第一次會擲出。</summary>
+        public int ThrowOnSendCount { get; set; } = int.MaxValue;
 
         /// <summary>已送出的請求數。</summary>
         public int RequestCount => Requests.Count;
@@ -48,6 +51,23 @@ namespace Ozakboy.Gmail.Tests.TestSupport
             return Enqueue(() => new HttpResponseMessage(statusCode)
             {
                 Content = new StringContent(json, Encoding.UTF8, "application/json"),
+            });
+        }
+
+        /// <summary>排入一個 multipart/mixed 回應(batch 端點用),boundary 會寫進 Content-Type。</summary>
+        public RecordingHandler EnqueueMultipart(string body, string boundary, HttpStatusCode statusCode = HttpStatusCode.OK)
+        {
+            return Enqueue(() =>
+            {
+                var response = new HttpResponseMessage(statusCode)
+                {
+                    Content = new StringContent(body, Encoding.UTF8),
+                };
+
+                response.Content.Headers.ContentType =
+                    System.Net.Http.Headers.MediaTypeHeaderValue.Parse("multipart/mixed; boundary=" + boundary);
+
+                return response;
             });
         }
 
@@ -105,7 +125,8 @@ namespace Ozakboy.Gmail.Tests.TestSupport
 
             OnRequest?.Invoke(request);
 
-            if (ThrowOnSend != null)
+            // Requests 已經先記錄,所以這裡的 Count 就是「這是第幾次請求」
+            if (ThrowOnSend != null && Requests.Count <= ThrowOnSendCount)
                 throw ThrowOnSend;
 
             if (_responses.Count > 0)

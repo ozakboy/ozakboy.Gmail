@@ -36,10 +36,14 @@ namespace Ozakboy.Gmail.Core
         /// </summary>
         /// <param name="maxRetries">失敗後最多重送幾次,0 表示不重試。How many times a failed request is re-sent; 0 disables retries.</param>
         /// <param name="baseDelay">第一次重試前的延遲,之後每次加倍。The delay before the first retry; doubled on every subsequent retry.</param>
-        internal RetryPolicy(int maxRetries, TimeSpan baseDelay)
+        /// <param name="maxRetryDelay">單次等待的上限,null 表示不設限。The cap on a single wait; null means no cap.</param>
+        /// <param name="retryOnNetworkErrors">是否把傳輸層失敗也視為可重試。Whether transport level failures count as retryable too.</param>
+        internal RetryPolicy(int maxRetries, TimeSpan baseDelay, TimeSpan? maxRetryDelay = null, bool retryOnNetworkErrors = false)
         {
             MaxRetries = maxRetries;
             BaseDelay = baseDelay;
+            MaxRetryDelay = maxRetryDelay;
+            RetryOnNetworkErrors = retryOnNetworkErrors;
         }
 
         /// <summary>
@@ -53,6 +57,29 @@ namespace Ozakboy.Gmail.Core
         /// The delay before the first retry.
         /// </summary>
         internal TimeSpan BaseDelay { get; }
+
+        /// <summary>
+        /// 單次等待的上限,null 表示不設限。
+        /// The cap on a single wait; null means no cap.
+        /// </summary>
+        internal TimeSpan? MaxRetryDelay { get; }
+
+        /// <summary>
+        /// 是否把傳輸層失敗(<see cref="System.Net.Http.HttpRequestException"/>)也視為可重試。
+        /// Whether transport level failures (<see cref="System.Net.Http.HttpRequestException"/>) count as retryable too.
+        /// </summary>
+        internal bool RetryOnNetworkErrors { get; }
+
+        /// <summary>
+        /// 判斷等待時間是否超過 <see cref="MaxRetryDelay"/>。超過就不該再等,改讓呼叫端在工作層級退避。
+        /// Determines whether a delay exceeds <see cref="MaxRetryDelay"/>; when it does, waiting is pointless and the caller should back off at the job level.
+        /// </summary>
+        /// <param name="delay">要等待的時間。The delay that would be waited.</param>
+        /// <returns>true 表示超過上限;<see cref="MaxRetryDelay"/> 為 null 時永遠是 false。true when the cap is exceeded; always false when <see cref="MaxRetryDelay"/> is null.</returns>
+        internal bool ExceedsMaxDelay(TimeSpan delay)
+        {
+            return MaxRetryDelay.HasValue && delay > MaxRetryDelay.Value;
+        }
 
         /// <summary>
         /// 判斷該狀態碼與錯誤原因是否值得重試:429、任何 5xx,或 403 且原因為 Gmail 的配額代碼。

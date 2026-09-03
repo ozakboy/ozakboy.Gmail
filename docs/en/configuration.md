@@ -1,11 +1,11 @@
 ---
 title: Configuration
-description: Every option of Ozakboy.Gmail 2.0.0 — GoogleOAuthOptions, GoogleAuthorizationUrlOptions, GmailClientOptions — plus the Google-side settings and gotchas.
+description: Every option of Ozakboy.Gmail 2.1.0 — GoogleOAuthOptions, GoogleAuthorizationUrlOptions, GmailClientOptions — plus the Google-side settings and gotchas.
 ---
 
 # Configuration
 
-Ozakboy.Gmail has three option classes. Only one of them (`GoogleOAuthOptions`) holds secrets; the other two are behaviour knobs with sensible defaults.
+Ozakboy.Gmail has four option classes. Only one of them (`GoogleOAuthOptions`) holds secrets; the other two are behaviour knobs with sensible defaults.
 
 ## `GoogleOAuthOptions`
 
@@ -73,6 +73,9 @@ Passed to `GmailClient` and (retry settings only) to `GoogleOAuthClient`; `null`
 |---|---|---|---|
 | `MaxRetries` | `int` | `3` | Retries after a retryable failure (429, any 5xx, 403 `rateLimitExceeded` / `userRateLimitExceeded`). `0` disables retries. Negative throws `ArgumentOutOfRangeException`. |
 | `RetryBaseDelay` | `TimeSpan` | 1 second | First retry delay; doubled per retry (1 s, 2 s, 4 s). A `Retry-After` response header overrides the computed delay for that attempt. Set to `TimeSpan.Zero` in tests. |
+| `MaxRetryDelay` | `TimeSpan?` | 60 seconds | (2.1.0) The longest the client will wait before a retry. A backoff or `Retry-After` above it ends the retry loop at once — the exception arrives with `RetryAfter` set so your job can schedule the next attempt. `null` removes the cap. |
+| `RetryOnNetworkErrors` | `bool` | `false` | (2.1.0) Retry `HttpRequestException` (connection reset, DNS, TLS) with the same backoff. Off by default so 2.0.0 behaviour is unchanged; turn it on for unattended sync jobs. After the retries the last exception still propagates as `HttpRequestException`. |
+| `BatchSize` | `int` | `50` | (2.1.0) Messages per HTTP request in `BatchGetMessagesAsync`, 1–100. Google recommends staying at 50 or below. |
 | `UserId` | `string` | `"me"` | The `{userId}` path segment of every Gmail URL. `me` means the authorized user. Only change it for domain-wide delegation. |
 
 ```csharp
@@ -80,6 +83,27 @@ var gmail = new GmailClient(httpClient, provider, new GmailClientOptions
 {
     MaxRetries     = 5,
     RetryBaseDelay = TimeSpan.FromSeconds(2),
+});
+```
+
+## `GoogleAccessTokenProviderOptions` (2.1.0)
+
+Passed to `GoogleAccessTokenProvider`; `null` uses the defaults.
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `InitialAccessToken` | `string?` | `null` | An access token you already hold (from the database, say). Used only together with `InitialExpiresAt`; with either missing the first call refreshes. |
+| `InitialExpiresAt` | `DateTimeOffset?` | `null` | Expiry of `InitialAccessToken`. |
+| `RefreshSkew` | `TimeSpan` | 2 minutes | Refresh this long *before* `ExpiresAt`, so a token never expires mid-request. Negative throws `ArgumentOutOfRangeException`. |
+| `OnRefreshed` | `Func<GoogleTokenResponse, CancellationToken, Task>?` | `null` | Awaited after every successful refresh with the new token — encrypt and persist it here. An exception from it propagates to the caller of `GetAccessTokenAsync`, but the in-memory cache is already updated. |
+
+```csharp
+var provider = new GoogleAccessTokenProvider(oauthClient, refreshToken, new GoogleAccessTokenProviderOptions
+{
+    InitialAccessToken = account.AccessToken,
+    InitialExpiresAt   = account.ExpiresAt,
+    RefreshSkew        = TimeSpan.FromMinutes(5),
+    OnRefreshed        = (token, ct) => store.SaveAccessTokenAsync(account.Id, token.AccessToken!, token.ExpiresAt, ct),
 });
 ```
 

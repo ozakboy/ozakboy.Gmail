@@ -1,11 +1,11 @@
 ---
 title: 設定
-description: Ozakboy.Gmail 2.0.0 的每個選項——GoogleOAuthOptions、GoogleAuthorizationUrlOptions、GmailClientOptions——以及 Google 端的設定與常見的坑。
+description: Ozakboy.Gmail 2.1.0 的每個選項——GoogleOAuthOptions、GoogleAuthorizationUrlOptions、GmailClientOptions——以及 Google 端的設定與常見的坑。
 ---
 
 # 設定
 
-Ozakboy.Gmail 有三個選項類別。只有 `GoogleOAuthOptions` 放機密;另外兩個是行為旋鈕,預設值就能用。
+Ozakboy.Gmail 有四個選項類別。只有 `GoogleOAuthOptions` 放機密;另外兩個是行為旋鈕,預設值就能用。
 
 ## `GoogleOAuthOptions`
 
@@ -73,6 +73,9 @@ Google Cloud 專案的 OAuth 同意畫面在 **Testing** 狀態且使用 `gmail.
 |---|---|---|---|
 | `MaxRetries` | `int` | `3` | 可重試失敗(429、任何 5xx、403 `rateLimitExceeded` / `userRateLimitExceeded`)後的重試次數。`0` 關閉重試。負數拋 `ArgumentOutOfRangeException`。 |
 | `RetryBaseDelay` | `TimeSpan` | 1 秒 | 第一次重試的等待;之後每次加倍(1s、2s、4s)。回應有 `Retry-After` 標頭時該次改用它。測試設 `TimeSpan.Zero`。 |
+| `MaxRetryDelay` | `TimeSpan?` | 60 秒 | (2.1.0)重試前最多等多久。退避或 `Retry-After` 超過它就立刻結束重試迴圈——例外帶著 `RetryAfter`,讓你的 job 自己排下一次。`null` 取消上限。 |
+| `RetryOnNetworkErrors` | `bool` | `false` | (2.1.0)以同一套退避重試 `HttpRequestException`(連線重置、DNS、TLS)。預設關閉,行為與 2.0.0 一致;無人值守的同步 job 建議打開。重試用盡後最後那個仍以 `HttpRequestException` 上拋。 |
+| `BatchSize` | `int` | `50` | (2.1.0)`BatchGetMessagesAsync` 一個 HTTP 請求放幾封,1–100。Google 建議 50 以下。 |
 | `UserId` | `string` | `"me"` | 所有 Gmail 網址的 `{userId}` 路徑段。`me` 代表已授權的使用者。只有 domain-wide delegation 才需要改。 |
 
 ```csharp
@@ -80,6 +83,27 @@ var gmail = new GmailClient(httpClient, provider, new GmailClientOptions
 {
     MaxRetries     = 5,
     RetryBaseDelay = TimeSpan.FromSeconds(2),
+});
+```
+
+## `GoogleAccessTokenProviderOptions`(2.1.0)
+
+傳給 `GoogleAccessTokenProvider`;`null` 用預設值。
+
+| 屬性 | 型別 | 預設 | 說明 |
+|---|---|---|---|
+| `InitialAccessToken` | `string?` | `null` | 你手上已有的 access token(例如從資料庫讀的)。只在 `InitialExpiresAt` 也有時才用;缺一個第一次呼叫就續期。 |
+| `InitialExpiresAt` | `DateTimeOffset?` | `null` | `InitialAccessToken` 的到期時間。 |
+| `RefreshSkew` | `TimeSpan` | 2 分鐘 | 在 `ExpiresAt` *之前*這麼久就續期,token 才不會在請求中途過期。負值拋 `ArgumentOutOfRangeException`。 |
+| `OnRefreshed` | `Func<GoogleTokenResponse, CancellationToken, Task>?` | `null` | 每次續期成功後帶新 token 被 `await`——在這裡加密落庫。它拋的例外會傳給 `GetAccessTokenAsync` 的呼叫者,但記憶體快取已經更新。 |
+
+```csharp
+var provider = new GoogleAccessTokenProvider(oauthClient, refreshToken, new GoogleAccessTokenProviderOptions
+{
+    InitialAccessToken = account.AccessToken,
+    InitialExpiresAt   = account.ExpiresAt,
+    RefreshSkew        = TimeSpan.FromMinutes(5),
+    OnRefreshed        = (token, ct) => store.SaveAccessTokenAsync(account.Id, token.AccessToken!, token.ExpiresAt, ct),
 });
 ```
 

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using Ozakboy.Gmail.Core;
 
 namespace Ozakboy.Gmail
@@ -96,6 +97,122 @@ namespace Ozakboy.Gmail
         public byte[]? DecodeRaw()
         {
             return Raw == null ? null : Base64Url.Decode(Raw);
+        }
+
+        /// <summary>
+        /// 取出純文字內文:深度優先走訪 Gmail 已切好的 MIME 區段,回傳第一個非附件的 text/plain 區段解碼後的內容。
+        /// Returns the plain text body: walks the MIME parts Gmail already split, depth first, and decodes the first text/plain part that is not an attachment.
+        /// </summary>
+        /// <remarks>
+        /// 內容由 Gmail 轉成 UTF-8,因此一律以 UTF-8 解碼。要區分 multipart/alternative 中的哪一段時,請直接走 <see cref="Payload"/>。
+        /// Gmail normalises the content to UTF-8, so it is always decoded as UTF-8. Walk <see cref="Payload"/> yourself when you need to pick a specific branch of a multipart/alternative.
+        /// </remarks>
+        /// <returns>純文字內文;<see cref="Payload"/> 為 null 或沒有這種區段時為 null。The plain text body, or null when <see cref="Payload"/> is null or no such part exists.</returns>
+        /// <exception cref="FormatException">區段內容不是合法的 base64url 時擲出。Thrown when the part content is not valid base64url.</exception>
+        public string? GetTextBody()
+        {
+            return FindBody("text/plain");
+        }
+
+        /// <summary>
+        /// 取出 HTML 內文:深度優先走訪 Gmail 已切好的 MIME 區段,回傳第一個非附件的 text/html 區段解碼後的內容。
+        /// Returns the HTML body: walks the MIME parts Gmail already split, depth first, and decodes the first text/html part that is not an attachment.
+        /// </summary>
+        /// <returns>HTML 內文;<see cref="Payload"/> 為 null 或沒有這種區段時為 null。The HTML body, or null when <see cref="Payload"/> is null or no such part exists.</returns>
+        /// <exception cref="FormatException">區段內容不是合法的 base64url 時擲出。Thrown when the part content is not valid base64url.</exception>
+        public string? GetHtmlBody()
+        {
+            return FindBody("text/html");
+        }
+
+        /// <summary>
+        /// 列出郵件中的所有附件區段(含以 Content-ID 內嵌在 HTML 內文裡的圖片),依 MIME 樹的深度優先順序排列。
+        /// Lists every attachment part of the message, including images inlined into the HTML body by Content-ID, in the depth-first order of the MIME tree.
+        /// </summary>
+        /// <remarks>
+        /// 判定條件是「有檔名」或「有 attachmentId」,multipart/* 容器一律排除。
+        /// 回傳的項目不含附件內容:<see cref="GmailAttachmentInfo.AttachmentId"/> 有值時要另外呼叫 GetAttachmentAsync,
+        /// 為 null 表示內容已在 <c>Part.Body.Data</c>。
+        /// A part counts when it has a file name or an attachment id; multipart/* containers are always skipped.
+        /// The entries carry no content: fetch it with GetAttachmentAsync when <see cref="GmailAttachmentInfo.AttachmentId"/> is set,
+        /// and read <c>Part.Body.Data</c> when it is null.
+        /// </remarks>
+        /// <returns>附件摘要清單,永不為 null;<see cref="Payload"/> 為 null 或沒有附件時為空清單。The attachment summaries; never null, and empty when <see cref="Payload"/> is null or there are no attachments.</returns>
+        public List<GmailAttachmentInfo> GetAttachments()
+        {
+            var result = new List<GmailAttachmentInfo>();
+
+            foreach (var part in MessagePartWalker.Flatten(Payload))
+            {
+                // multipart/* 只是容器,本身不是附件
+                // A multipart/* part is only a container, never an attachment itself.
+                if (part.MimeType != null && part.MimeType.StartsWith("multipart/", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var hasFileName = !string.IsNullOrEmpty(part.Filename);
+                var attachmentId = part.Body?.AttachmentId;
+                if (!hasFileName && attachmentId == null)
+                    continue;
+
+                result.Add(new GmailAttachmentInfo
+                {
+                    PartId = part.PartId,
+                    FileName = part.Filename,
+                    MimeType = part.MimeType,
+                    Size = part.Body == null ? 0L : part.Body.Size,
+                    AttachmentId = attachmentId,
+                    ContentId = TrimAngleBrackets(part.GetHeader("Content-ID")),
+                    Part = part,
+                });
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// 找出第一個符合 MIME 類型、非附件且帶內容的區段,並以 UTF-8 解碼。
+        /// Finds the first part with the given MIME type that is not an attachment and carries content, then decodes it as UTF-8.
+        /// </summary>
+        /// <param name="mimeType">要比對的 MIME 類型(不分大小寫)。The MIME type to match, ignoring case.</param>
+        /// <returns>解碼後的內容,找不到時為 null。The decoded content, or null when no part matches.</returns>
+        private string? FindBody(string mimeType)
+        {
+            foreach (var part in MessagePartWalker.Flatten(Payload))
+            {
+                if (!string.Equals(part.MimeType, mimeType, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                // 有檔名的 text/plain 是附件(例如 .txt 檔),不是內文
+                // A text/plain part with a file name is an attachment (a .txt file, say), not the body.
+                if (!string.IsNullOrEmpty(part.Filename))
+                    continue;
+
+                var data = part.Body?.Data;
+                if (data == null)
+                    continue;
+
+                return Encoding.UTF8.GetString(Base64Url.Decode(data));
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// 去掉 Content-ID 前後的角括號。
+        /// Strips the angle brackets around a Content-ID.
+        /// </summary>
+        /// <param name="value">原始標頭值,可為 null。The raw header value; may be null.</param>
+        /// <returns>去掉角括號後的值;<paramref name="value"/> 為 null 時為 null。The value without brackets, or null when <paramref name="value"/> is null.</returns>
+        private static string? TrimAngleBrackets(string? value)
+        {
+            if (value == null)
+                return null;
+
+            var trimmed = value.Trim();
+            if (trimmed.Length >= 2 && trimmed[0] == '<' && trimmed[trimmed.Length - 1] == '>')
+                return trimmed.Substring(1, trimmed.Length - 2);
+
+            return trimmed;
         }
     }
 }

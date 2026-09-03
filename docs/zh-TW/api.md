@@ -1,6 +1,6 @@
 ---
 title: API 文件
-description: Ozakboy.Gmail 2.0.0 完整公開 API——GmailClient、GoogleOAuthClient、模型、選項與 GmailApiException 錯誤契約。
+description: Ozakboy.Gmail 2.1.0 完整公開 API——GmailClient、GoogleOAuthClient、模型、選項與 GmailApiException 錯誤契約。
 ---
 
 # API 文件
@@ -9,14 +9,14 @@ description: Ozakboy.Gmail 2.0.0 完整公開 API——GmailClient、GoogleOAuth
 
 Ozakboy.Gmail 是一個薄的、只提供非同步 API 的 [Gmail REST API](https://developers.google.com/workspace/gmail/api/reference/rest) 客戶端,外加 Google OAuth 2.0 token 端點。**不依賴** `Google.Apis.*`、不儲存 token、不開 SMTP 或 IMAP 連線,(2.0.0 起)也不帶任何 MIME 函式庫——寄出的信由內建 RFC 822 組信器組裝或以 raw bytes 交入。寄信走 `messages.send`,所以單一 `gmail.modify` scope 就夠。
 
-標示 **(草案外新增)** 的項目不在原本 1.0.0 的套件規格裡,是因為第一個使用者(Sower)會用到而補上。標示 **(2.0.0)** 的成員取代了 1.0.0 用 MimeKit 型別的成員——見[升級指南](./migration.md)。
+標示 **(草案外新增)** 的項目不在原本 1.0.0 的套件規格裡,是因為第一個使用者(Sower)會用到而補上。標示 **(2.0.0)** 的成員取代了 1.0.0 用 MimeKit 型別的成員——見[升級指南](./migration.md)。標示 **(2.1.0)** 的成員是純新增。
 
 ## 命名空間
 
 | 命名空間 | 內容 |
 |---|---|
-| `Ozakboy.Gmail` | `IGmailClient`、`GmailClient`、`GmailClientOptions`、`GmailApiException`、`GmailScopes`、`GmailSystemLabels`、`GmailOutgoingMessage`、`GmailAddress`、`GmailAttachmentContent` 與所有 `Gmail*` 模型 |
-| `Ozakboy.Gmail.OAuth` | `IGoogleOAuthClient`、`GoogleOAuthClient`、`GoogleOAuthOptions`、`GoogleAuthorizationUrlOptions`、`GoogleTokenResponse`、`GoogleIdTokenPayload` |
+| `Ozakboy.Gmail` | `IGmailClient`、`GmailClient`、`GmailClientOptions`、`GmailApiException`、`GmailScopes`、`GmailSystemLabels`、`GmailOutgoingMessage`、`GmailAddress`、`GmailAttachmentContent`、`GmailBatchGetResult`、`GmailBatchFailure`、`GmailThread`、`GmailAttachmentInfo` 與所有 `Gmail*` 模型 |
+| `Ozakboy.Gmail.OAuth` | `IGoogleOAuthClient`、`GoogleOAuthClient`、`GoogleOAuthOptions`、`GoogleAuthorizationUrlOptions`、`GoogleTokenResponse`、`GoogleIdTokenPayload`、`GoogleAccessTokenProvider`、`GoogleAccessTokenProviderOptions` |
 | `Ozakboy.Gmail.Core` | 內部 HTTP / JSON / base64url 管線。**不屬於公開 API**,請勿依賴。 |
 
 ## 全套件通用慣例
@@ -24,7 +24,7 @@ Ozakboy.Gmail 是一個薄的、只提供非同步 API 的 [Gmail REST API](http
 - **只做 async。** 所有網路成員回 `Task` / `Task<T>`、以 `Async` 結尾、最後一個參數是 `CancellationToken cancellationToken = default`。沒有同步版。
 - 內部每個 `await` 都 **`ConfigureAwait(false)`**;函式庫絕不捕捉 synchronization context。
 - **取消例外不包裝。** `OperationCanceledException` 原樣往上拋。
-- **非 2xx 一律 `GmailApiException`**——見[例外](#例外)。網路層失敗(`HttpRequestException`)原樣上拋、不重試。
+- **非 2xx 一律 `GmailApiException`**——見[例外](#例外)。網路層失敗(`HttpRequestException`)原樣上拋;只有開了 `GmailClientOptions.RetryOnNetworkErrors` 才會重試。
 - **userId 永遠是 `me`**(可用 `GmailClientOptions.UserId` 覆寫)。
 - **模型都是 plain class**,public get/set 屬性,名稱對齊 Gmail REST 欄位(PascalCase)。JSON 沒有的欄位維持 `null`;List 型別屬性**永不為 null**(預設空清單)。
 - **Id 都是字串。** `historyId`、`internalDate` 這類 Gmail 以字串序列化的 int64/uint64 欄位,依下文標示分別以 `string`(`HistoryId`)或 `long`(`InternalDate`、`Size*`)呈現。
@@ -86,6 +86,13 @@ public interface IGmailClient
     Task<GmailLabel> UpdateLabelAsync(string id, string? name = null, GmailLabelOptions? options = null, CancellationToken cancellationToken = default);   // (草案外新增)
     Task DeleteLabelAsync(string id, CancellationToken cancellationToken = default);                                                                    // (草案外新增)
 
+    Task<GmailBatchGetResult> BatchGetMessagesAsync(IEnumerable<string> ids, GmailMessageFormat format = GmailMessageFormat.Full, IEnumerable<string>? metadataHeaders = null, CancellationToken cancellationToken = default);   // (2.1.0)
+
+    Task<GmailThread> GetThreadAsync(string id, GmailMessageFormat format = GmailMessageFormat.Full, IEnumerable<string>? metadataHeaders = null, CancellationToken cancellationToken = default);   // (2.1.0)
+    Task<GmailThread> ModifyThreadAsync(string id, IEnumerable<string>? addLabelIds, IEnumerable<string>? removeLabelIds, CancellationToken cancellationToken = default);                             // (2.1.0)
+    Task<GmailThread> TrashThreadAsync(string id, CancellationToken cancellationToken = default);                                                                                                    // (2.1.0)
+    Task<GmailThread> UntrashThreadAsync(string id, CancellationToken cancellationToken = default);                                                                                                  // (2.1.0)
+
     Task<GmailAttachment> GetAttachmentAsync(string messageId, string attachmentId, CancellationToken cancellationToken = default);
     Task<long> DownloadAttachmentAsync(string messageId, string attachmentId, Stream destination, CancellationToken cancellationToken = default);
 
@@ -117,9 +124,12 @@ public class GmailClient : IGmailClient
 ```csharp
 public class GmailClientOptions
 {
-    public int      MaxRetries     { get; set; } = 3;
-    public TimeSpan RetryBaseDelay { get; set; } = TimeSpan.FromSeconds(1);
-    public string   UserId         { get; set; } = "me";
+    public int       MaxRetries           { get; set; } = 3;
+    public TimeSpan  RetryBaseDelay       { get; set; } = TimeSpan.FromSeconds(1);
+    public TimeSpan? MaxRetryDelay        { get; set; } = TimeSpan.FromSeconds(60);   // (2.1.0)
+    public bool      RetryOnNetworkErrors { get; set; }                                // (2.1.0) default false
+    public int       BatchSize            { get; set; } = 50;                          // (2.1.0) 1..100
+    public string    UserId               { get; set; } = "me";
 }
 ```
 
@@ -127,6 +137,9 @@ public class GmailClientOptions
 |---|---|
 | `MaxRetries` | 可重試失敗(HTTP 429、任何 5xx、或 reason 為 `rateLimitExceeded` / `userRateLimitExceeded` 的 403)後**重送**的次數。`3` 代表最多四次嘗試。`0` 關閉重試。負數在建構 client 時拋 `ArgumentOutOfRangeException`。 |
 | `RetryBaseDelay` | 第一次重試前的等待;之後每次加倍(預設 1s → 2s → 4s)。回應帶 `Retry-After` 標頭時,該次改用標頭的值。設 `TimeSpan.Zero` 測試就不用等。 |
+| `MaxRetryDelay` **(2.1.0)** | 重試前最多等多久。算出的退避或 `Retry-After` 超過它時不重試,立即拋 `GmailApiException` 並把值放進 `RetryAfter`。`null` 取消上限;負值拋 `ArgumentOutOfRangeException`。 |
+| `RetryOnNetworkErrors` **(2.1.0)** | 為 `true` 時,底層 `HttpClient` 拋的 `HttpRequestException`(連線重置、DNS、TLS)以同一套退避重試。重試用盡後**最後一個 `HttpRequestException` 原樣上拋**,不會包成 `GmailApiException`。取消永不重試。 |
+| `BatchSize` **(2.1.0)** | `BatchGetMessagesAsync` 一個 HTTP 請求放幾封(1–100;Google 建議 ≤ 50)。更長的 id 清單自動分段。 |
 | `UserId` | 路徑裡的 `{userId}`。除非是 domain-wide delegation 的服務帳號,否則維持 `me`。 |
 
 重試套用於所有 Gmail 呼叫**以及** OAuth token / revoke 呼叫。401、404、400 等不可重試狀態絕不重送。
@@ -150,6 +163,10 @@ public class GmailClientOptions
 | `DeleteLabelAsync` **(草案外新增)** | `DELETE users/{userId}/labels/{id}` | 刪除**使用者**標籤;所有貼過該標籤的信會被移除標籤。系統標籤不可刪(Gmail 回 400)。 |
 | `GetAttachmentAsync` | `GET …/messages/{messageId}/attachments/{attachmentId}` | `GmailAttachment`,`Data` 是**已解碼**的位元組、`Size` 是 Gmail 回報的大小。Gmail 附件是 JSON 包 base64url,整包必須在記憶體緩衝一次——線路上沒有真正的串流。 |
 | `DownloadAttachmentAsync` | 同上 | 解碼後寫進 `destination`,回寫入的位元組數。用途是把下載代理進 HTTP 回應、不落磁碟。`destination` 必須可寫;本套件**不會**幫你關閉或 flush。 |
+| `BatchGetMessagesAsync` **(2.1.0)** | `POST batch/gmail/v1`(`multipart/mixed`) | 一趟來回抓多封信——回填的主力。`ids` 依 `BatchSize` 分段、逐段循序送,每個子請求帶與 `GetMessageAsync` 相同的 `format` / `metadataHeaders`。回 [`GmailBatchGetResult`](#28-batch-結果討論串與附件資訊210):成功的在 `Messages`,單筆問題(列出後被刪、單筆限流)在 `Failures`——整批**不會**因這些而拋例外。batch 請求本身的 HTTP 層失敗(401、429、5xx)照一般 `GmailApiException` / 重試規則;回應對不回 id 時拋 `Reason == "batchParseError"` 的 `GmailApiException`。`ids` 為空不送請求。 |
+| `GetThreadAsync` **(2.1.0)** | `GET users/{userId}/threads/{id}` | 整串對話,`GmailThread.Messages` 依 Gmail 順序含每一封,`format` / `metadataHeaders` 語意同 `GetMessageAsync`。 |
+| `ModifyThreadAsync` **(2.1.0)** | `POST …/threads/{id}/modify` | 對討論串裡**每一封**加 / 移除標籤。驗證同 `ModifyLabelsAsync`。 |
+| `TrashThreadAsync` / `UntrashThreadAsync` **(2.1.0)** | `POST …/threads/{id}/trash` / `untrash` | 整串丟垃圾桶 / 救回。 |
 | `SendAsync` **(2.0.0)** | `POST upload/gmail/v1/users/{userId}/messages/send?uploadType=multipart` | 寄出後的 `GmailMessage`(`Id`、`ThreadId`、`LabelIds`)。[`GmailOutgoingMessage`](#27-寄件模型gmailoutgoingmessagegmailaddressgmailattachmentcontent) 由內建 RFC 822 組信器序列化(`ToRfc822Bytes()`),以 `message/rfc822` 放進 multipart 上傳,適用 35 MB 上傳上限而非 JSON `raw` 的限制。`threadId` 讓信加入既有討論串——回信時請一併設 `InReplyTo` 與 `References`,否則 Gmail 不會串成同一串。 |
 | `SendRawAsync` **(2.0.0)** | 同上 | 同樣的上傳,但 RFC 822 bytes 由你自己提供——MimeKit、MailKit、`System.Net.Mail` 或任何工具都行。`rfc822` 為 `null` → `ArgumentNullException`,空陣列 → `ArgumentException`。 |
 
@@ -204,6 +221,9 @@ public class GmailMessage
     public DateTimeOffset? InternalDateTime { get; }       // InternalDate 轉換;0 時為 null
     public string? GetHeader(string name);                  // 在 Payload.Headers 不分大小寫查找;沒有回 null
     public byte[]? DecodeRaw();                              // (2.0.0) Raw 的 base64url 解碼;Raw 為 null 時回 null
+    public string? GetTextBody();                            // (2.1.0) 第一個非附件的 text/plain 部件,已解碼;沒有回 null
+    public string? GetHtmlBody();                            // (2.1.0) 第一個非附件的 text/html 部件,已解碼;沒有回 null
+    public List<GmailAttachmentInfo> GetAttachments();       // (2.1.0) 所有附件部件;永不為 null
 }
 
 public class GmailMessagePart
@@ -233,6 +253,8 @@ public class GmailMessagePartBody
     public byte[]? DecodeData();                 // Data 為 null 時回 null
 }
 ```
+
+`GetTextBody()` / `GetHtmlBody()` 走訪 Gmail 已拆好的部件(深度優先,含 `Payload` 本身),跳過帶 `Filename` 的部件,把第一個符合的內文從 base64url 解碼成 UTF-8——Gmail 不論原始 charset 都以 UTF-8 交出內文。`GetAttachments()` 收集所有帶 `Filename` 或 `AttachmentId` 的部件,內嵌圖片也算;見 [`GmailAttachmentInfo`](#28-batch-結果討論串與附件資訊210)。
 
 `GetHeader` 是你最常用到的輔助:`message.GetHeader("List-Unsubscribe")`、`message.GetHeader("Authentication-Results")`。它只搜最上層 payload 的標頭——正好就是 `format=Metadata` 回的東西。
 
@@ -394,6 +416,47 @@ public class GmailOutgoingMessage
 
 **拋出**(`ToRfc822Bytes()`,因此 `SendAsync` 也會):`To`、`Cc`、`Bcc` 全空、額外標頭與內建標頭同名(不分大小寫)、或 `InReplyTo` / `References` / 標頭值含 CR 或 LF 時拋 `InvalidOperationException`。
 
+### 2.8 Batch 結果、討論串與附件資訊(2.1.0)
+
+```csharp
+public class GmailBatchGetResult
+{
+    public List<GmailMessage>      Messages { get; }   // 永不為 null——回 2xx 的信
+    public List<GmailBatchFailure> Failures { get; }   // 永不為 null——沒成功的 id 各一筆
+}
+
+public class GmailBatchFailure
+{
+    public string? Id            { get; set; }   // 你要的那個 id
+    public int     StatusCode    { get; set; }   // 子回應狀態碼
+    public string? Reason        { get; set; }   // Google error.errors[0].reason,如 "notFound"
+    public string? ErrorMessage  { get; set; }
+    public bool    IsNotFound    { get; }        // 404——列出到抓取之間被刪;跳過
+    public bool    IsRateLimited { get; }        // 429,或 403 rateLimitExceeded / userRateLimitExceeded——這些 id 晚點再重抓
+}
+
+public class GmailThread
+{
+    public string?            Id        { get; set; }
+    public string?            HistoryId { get; set; }
+    public string?            Snippet   { get; set; }
+    public List<GmailMessage> Messages  { get; set; }   // 永不為 null
+}
+
+public class GmailAttachmentInfo
+{
+    public string?           PartId       { get; set; }
+    public string?           FileName     { get; set; }
+    public string?           MimeType     { get; set; }
+    public long              Size         { get; set; }   // Body.Size
+    public string?           AttachmentId { get; set; }   // Gmail 另外存放的附件才有 → GetAttachmentAsync;null 代表位元組直接在 Part.Body.Data
+    public string?           ContentId    { get; set; }   // Content-ID 標頭去掉角括號;內嵌(cid:)圖片會有
+    public GmailMessagePart? Part         { get; set; }   // 原始部件
+}
+```
+
+Batch 的子失敗刻意**不**由 client 重試:`notFound` 永遠不會成功,單筆限流則由 job 層把那些 id 重新排隊,比整批卡住合理。
+
 ---
 
 ## 3. `IGoogleOAuthClient` / `GoogleOAuthClient`(`Ozakboy.Gmail.OAuth`)
@@ -497,6 +560,50 @@ public class GoogleIdTokenPayload
 
 `Parse` 把 JWT 的 payload 段 base64url 解碼、讀出標準 claim。**不驗證簽章。** 這只對「你剛剛直接從 Google token 端點經 TLS 拿到的 token」(`GoogleTokenResponse.IdToken`)安全——不要拿它驗證瀏覽器或第三方交給你的 token。`null` 或空白拋 `ArgumentException`;其他不是 JWT 的輸入拋 `FormatException`。
 
+### 3.6 `GoogleAccessTokenProvider`(2.1.0)
+
+```csharp
+public class GoogleAccessTokenProviderOptions
+{
+    public string?         InitialAccessToken { get; set; }                              // 手上已有的 token……
+    public DateTimeOffset? InitialExpiresAt   { get; set; }                              // ……兩個都給才算
+    public TimeSpan        RefreshSkew        { get; set; } = TimeSpan.FromMinutes(2);   // 到期前多久續期;負值拋例外
+    public Func<GoogleTokenResponse, CancellationToken, Task>? OnRefreshed { get; set; } // 新 token 在這裡存起來
+}
+
+public class GoogleAccessTokenProvider
+{
+    public GoogleAccessTokenProvider(IGoogleOAuthClient oauthClient, string refreshToken, GoogleAccessTokenProviderOptions? options = null);
+
+    public string?         CurrentAccessToken { get; }   // 快取中的 token,第一次續期前為 null
+    public DateTimeOffset? ExpiresAt          { get; }
+    public Task<string> GetAccessTokenAsync(CancellationToken cancellationToken = default);
+    public void Invalidate();                            // 清掉快取,下次呼叫就續期
+}
+```
+
+一個信箱一個現成的 access token 提供者:給它 refresh token,把 `provider.GetAccessTokenAsync` 交給 `GmailClient`。
+
+```csharp
+var provider = new GoogleAccessTokenProvider(oauthClient, refreshToken, new GoogleAccessTokenProviderOptions
+{
+    InitialAccessToken = account.AccessToken,
+    InitialExpiresAt   = account.ExpiresAt,
+    OnRefreshed        = (token, ct) => store.SaveAccessTokenAsync(account.Id, token.AccessToken!, token.ExpiresAt, ct),
+});
+
+IGmailClient gmail = new GmailClient(httpClient, provider.GetAccessTokenAsync);
+```
+
+| 行為 | 細節 |
+|---|---|
+| 快取 | access token 放記憶體;`ExpiresAt - RefreshSkew` 還在未來時直接回、不打網路。 |
+| 續期 | 否則呼叫 `RefreshAsync(refreshToken)`、更新快取,再 `await` `OnRefreshed`(它拋例外會上拋,但快取已更新)。 |
+| 並發 | 續期序列化:二十個呼叫者同時撞到過期 token,只會發**一次** token 請求,其他人等著拿同一個。 |
+| 失敗 | `RefreshAsync` 的例外——通常是 refresh token 已死時 `IsUnauthorized` 的 `GmailApiException`——原樣上拋,快取不動。 |
+| 儲存 | 什麼都不寫。refresh token 只活在 private 欄位;access token 要落地就靠 `OnRefreshed`。 |
+| 生命週期 | 一個信箱一個 provider;執行緒安全,帳號連著就一直留著用。 |
+
 ---
 
 ## 例外
@@ -505,7 +612,7 @@ public class GoogleIdTokenPayload
 |---|---|
 | `GmailApiException` | Gmail **或** Google OAuth 端點回任何非 2xx,且重試已用盡。 |
 | `OperationCanceledException` | `CancellationToken` 被取消。原樣上拋,重試等待中也一樣。 |
-| `HttpRequestException` | 收到回應前的網路 / DNS / TLS 失敗。原樣上拋、不重試。 |
+| `HttpRequestException` | 收到回應前的網路 / DNS / TLS 失敗。原樣上拋;只有 `RetryOnNetworkErrors` 才重試,而且用盡後仍是原樣上拋。 |
 | `ArgumentNullException` / `ArgumentException` / `ArgumentOutOfRangeException` | 參數無效,在**送出任何請求前**拋出(null id、空標籤清單、batch 超過 1000 個 id、`MaxRetries` 為負、`ClientId` 為空……)。 |
 | `InvalidOperationException` | `accessTokenProvider` 回 `null` 或空字串;或 `GmailOutgoingMessage.ToRfc822Bytes()` / `SendAsync` 發現沒有收件人、額外標頭與內建標頭衝突、標頭值含 CR / LF。 |
 | `FormatException` | `GoogleIdTokenPayload.Parse` 收到的不是 JWT。 |
@@ -525,6 +632,7 @@ public class GmailApiException : Exception
     public bool    IsHistoryExpired { get; }   // ListHistoryAsync 的 404 → startHistoryId 太舊,改用時間窗口重掃
     public bool    IsRateLimited    { get; }   // 429,或 reason 為 rateLimitExceeded / userRateLimitExceeded 的 403
     public bool    IsNotFound       { get; }   // 非 IsHistoryExpired 的 404(信被刪、標籤不在……)
+    public TimeSpan? RetryAfter     { get; }   // (2.1.0) 最後一次失敗回應的 Retry-After;沒有為 null
 }
 ```
 
@@ -534,7 +642,7 @@ public class GmailApiException : Exception
 
 - `IsUnauthorized` → 把帳號標成需要重新授權,使用者重新同意前停止呼叫。換新的 access token 沒用:Gmail 401 代表 provider 已經給了它手上最好的 token,OAuth `invalid_grant` 則代表 refresh token 本身已死。
 - `IsHistoryExpired` → 丟掉存的 history id,用 `ListMessagesAsync("newer_than:…")` 重掃,再把 `GetProfileAsync` 的 `HistoryId` 存起來。
-- `IsRateLimited` → client 已經退避重試 `MaxRetries` 次了;請在 job 層級再退避。
+- `IsRateLimited` → client 已經退避重試 `MaxRetries` 次(或因 `Retry-After` 超過 `MaxRetryDelay` 提早放棄);請在 job 層級再退避,`RetryAfter` 有值就用它。
 - `GetMessageAsync` 的 `IsNotFound` → 信在列出與抓取之間被刪了;跳過。
 
 ### 重試策略
@@ -545,9 +653,9 @@ public class GmailApiException : Exception
 | 500、502、503、504(任何 5xx) | 是 | 有 `Retry-After` 時尊重 |
 | reason 為 `rateLimitExceeded` / `userRateLimitExceeded` 的 403 | 是 | Gmail 的每使用者配額錯誤是回 403 不是 429 |
 | 401、400、403(其他 reason)、404、409、412 … | 否 | 立即拋出 |
-| `HttpRequestException` | 否 | 立即拋出 |
+| `HttpRequestException` | 只在 `RetryOnNetworkErrors` 開啟時 | 否則立即拋出 |
 
-等待時間為 `RetryBaseDelay × 2^(attempt-1)`,預設 1s、2s、4s。重試**不會**再呼叫 `accessTokenProvider`,沿用同一個 token。
+等待時間為 `RetryBaseDelay × 2^(attempt-1)`,預設 1s、2s、4s,受 `MaxRetryDelay`(預設 60 秒)上限——超過上限就立刻結束重試迴圈,例外的 `RetryAfter` 帶著 `Retry-After` 的值。重試**不會**再呼叫 `accessTokenProvider`,沿用同一個 token。
 
 ---
 
@@ -566,6 +674,12 @@ public class GmailApiException : Exception
 | 任何必填字串參數(`id`、`messageId`、`attachmentId`、`name`、`code`、`refreshToken`、`token`、`redirectUri`、`state`、`startHistoryId`)為 `null` 或空 | `ArgumentException` |
 | `message`(`SendAsync`)、`rfc822`(`SendRawAsync`)、`destination`(`DownloadAttachmentAsync`)或 `scopes`(`BuildAuthorizationUrl`)為 `null` | `ArgumentNullException` |
 | `rfc822` 為空陣列(`SendRawAsync`) | `ArgumentException` |
+| `ids` 為 `null`(`BatchGetMessagesAsync`) | `ArgumentNullException` |
+| `ids` 為空(`BatchGetMessagesAsync`) | 不送請求;回空結果 |
+| `ids` 的元素為 `null` 或空白 | `ArgumentException` |
+| `MaxRetryDelay` 為 `null` | 重試等待不設上限 |
+| `InitialAccessToken` **或** `InitialExpiresAt` 為 `null`(`GoogleAccessTokenProviderOptions`) | 視為沒有快取;第一次呼叫就續期 |
+| `GmailMessage.Payload` 為 `null` | `GetTextBody()` / `GetHtmlBody()` 回 `null`;`GetAttachments()` 回空清單 |
 | `GmailOutgoingMessage.From` 為 `null` | 不寫 `From` 標頭,Gmail 填已授權信箱 |
 | `GmailOutgoingMessage.Subject` 為 `null` 或空 | 不寫 `Subject` 標頭 |
 | `GmailOutgoingMessage.TextBody` 與 `HtmlBody` 皆 `null` | 一個空的 `text/plain` 部件 |

@@ -24,7 +24,7 @@ namespace Ozakboy.Gmail.Tests
         public async Task 收到429後重試_第二次成功()
         {
             var handler = new RecordingHandler();
-            handler.EnqueueError(HttpStatusCode.TooManyRequests, "{\"error\":{\"code\":429,\"message\":\"Too many\",\"errors\":[{\"reason\":\"rateLimitExceeded\"}]}}");
+            handler.EnqueueError((HttpStatusCode)429   /* net48 沒有 TooManyRequests 列舉值 */, "{\"error\":{\"code\":429,\"message\":\"Too many\",\"errors\":[{\"reason\":\"rateLimitExceeded\"}]}}");
             handler.EnqueueJson("{\"emailAddress\":\"user@example.com\"}");
             var client = GmailTestFactory.CreateClient(handler);
 
@@ -126,7 +126,7 @@ namespace Ozakboy.Gmail.Tests
         public async Task RetryAfter秒數會取代計算出的延遲()
         {
             var handler = new RecordingHandler();
-            handler.EnqueueError(HttpStatusCode.TooManyRequests, "{}", retryAfterSeconds: "0");
+            handler.EnqueueError((HttpStatusCode)429   /* net48 沒有 TooManyRequests 列舉值 */, "{}", retryAfterSeconds: "0");
             handler.EnqueueJson("{}");
 
             // 基準延遲設成十分鐘,若沒有採用 Retry-After 這個測試會直接逾時
@@ -171,7 +171,7 @@ namespace Ozakboy.Gmail.Tests
             using var cancellation = new CancellationTokenSource();
             var handler = new RecordingHandler();
             handler.OnRequest = _ => cancellation.Cancel();
-            handler.EnqueueError(HttpStatusCode.TooManyRequests, "{}");
+            handler.EnqueueError((HttpStatusCode)429   /* net48 沒有 TooManyRequests 列舉值 */, "{}");
             var client = GmailTestFactory.CreateClient(handler);
 
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => client.GetProfileAsync(cancellation.Token));
@@ -295,6 +295,195 @@ namespace Ozakboy.Gmail.Tests
 
             Assert.Equal(TimeSpan.FromSeconds(30), policy.GetDelay(3, TimeSpan.FromSeconds(30)));
             Assert.Equal(TimeSpan.Zero, policy.GetDelay(1, TimeSpan.FromSeconds(-5)));
+        }
+
+        [Fact]
+        public async Task 失敗回應帶RetryAfter_例外帶回該值()
+        {
+            var handler = new RecordingHandler();
+            handler.EnqueueError((HttpStatusCode)429   /* net48 沒有 TooManyRequests 列舉值 */, "{}", retryAfterSeconds: "5");
+            var client = GmailTestFactory.CreateClient(handler, GmailTestFactory.NoDelayOptions(maxRetries: 0));
+
+            var exception = await Assert.ThrowsAsync<GmailApiException>(() => client.GetProfileAsync());
+
+            Assert.Equal(TimeSpan.FromSeconds(5), exception.RetryAfter);
+        }
+
+        [Fact]
+        public async Task 失敗回應沒有RetryAfter_例外的RetryAfter為null()
+        {
+            var handler = new RecordingHandler();
+            handler.EnqueueError(HttpStatusCode.NotFound, NotFoundBody);
+            var client = GmailTestFactory.CreateClient(handler);
+
+            var exception = await Assert.ThrowsAsync<GmailApiException>(() => client.GetMessageAsync("m1"));
+
+            Assert.Null(exception.RetryAfter);
+        }
+
+        [Fact]
+        public void GmailApiException_公開建構子的RetryAfter為null()
+        {
+            Assert.Null(new GmailApiException().RetryAfter);
+            Assert.Null(new GmailApiException("訊息").RetryAfter);
+            Assert.Null(new GmailApiException("訊息", new InvalidOperationException()).RetryAfter);
+        }
+
+        [Fact]
+        public async Task RetryAfter超過MaxRetryDelay_立即拋出不等待也不重試()
+        {
+            var handler = new RecordingHandler();
+            handler.EnqueueError((HttpStatusCode)429   /* net48 沒有 TooManyRequests 列舉值 */, "{}", retryAfterSeconds: "120");
+
+            // 上限設 10 秒,若沒有生效這個測試會真的等 120 秒
+            var options = new GmailClientOptions
+            {
+                MaxRetries = 3,
+                RetryBaseDelay = TimeSpan.Zero,
+                MaxRetryDelay = TimeSpan.FromSeconds(10),
+            };
+            var client = GmailTestFactory.CreateClient(handler, options);
+
+            var exception = await Assert.ThrowsAsync<GmailApiException>(() => client.GetProfileAsync());
+
+            Assert.Equal(1, handler.RequestCount);
+            Assert.Equal(TimeSpan.FromSeconds(120), exception.RetryAfter);
+        }
+
+        [Fact]
+        public async Task 指數退避超過MaxRetryDelay_立即拋出不重試()
+        {
+            var handler = new RecordingHandler();
+            handler.EnqueueError(HttpStatusCode.ServiceUnavailable, "{}");
+
+            var options = new GmailClientOptions
+            {
+                MaxRetries = 3,
+                RetryBaseDelay = TimeSpan.FromMinutes(5),
+                MaxRetryDelay = TimeSpan.FromSeconds(1),
+            };
+            var client = GmailTestFactory.CreateClient(handler, options);
+
+            var exception = await Assert.ThrowsAsync<GmailApiException>(() => client.GetProfileAsync());
+
+            Assert.Equal(1, handler.RequestCount);
+            Assert.Null(exception.RetryAfter);
+        }
+
+        [Fact]
+        public async Task MaxRetryDelay為null_不設上限仍照常重試()
+        {
+            var handler = new RecordingHandler();
+            handler.EnqueueError((HttpStatusCode)429   /* net48 沒有 TooManyRequests 列舉值 */, "{}", retryAfterSeconds: "0");
+            handler.EnqueueJson("{}");
+
+            var options = new GmailClientOptions
+            {
+                MaxRetries = 3,
+                RetryBaseDelay = TimeSpan.Zero,
+                MaxRetryDelay = null,
+            };
+            var client = GmailTestFactory.CreateClient(handler, options);
+
+            await client.GetProfileAsync();
+
+            Assert.Equal(2, handler.RequestCount);
+        }
+
+        [Fact]
+        public void RetryPolicy_MaxRetryDelay為null_任何延遲都不算超過上限()
+        {
+            var policy = new RetryPolicy(3, TimeSpan.FromSeconds(1), null);
+
+            Assert.False(policy.ExceedsMaxDelay(TimeSpan.FromHours(1)));
+            Assert.False(policy.ExceedsMaxDelay(TimeSpan.MaxValue));
+        }
+
+        [Fact]
+        public void RetryPolicy_延遲剛好等於上限不算超過_超過才算()
+        {
+            var policy = new RetryPolicy(3, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(10));
+
+            Assert.False(policy.ExceedsMaxDelay(TimeSpan.FromSeconds(10)));
+            Assert.True(policy.ExceedsMaxDelay(TimeSpan.FromSeconds(11)));
+        }
+
+        [Fact]
+        public async Task RetryOnNetworkErrors為false_網路層例外立即上拋只送一次()
+        {
+            var handler = new RecordingHandler { ThrowOnSend = new HttpRequestException("DNS 失敗") };
+            var options = new GmailClientOptions
+            {
+                MaxRetries = 3,
+                RetryBaseDelay = TimeSpan.Zero,
+                RetryOnNetworkErrors = false,
+            };
+            var client = GmailTestFactory.CreateClient(handler, options);
+
+            await Assert.ThrowsAsync<HttpRequestException>(() => client.GetProfileAsync());
+            Assert.Equal(1, handler.RequestCount);
+        }
+
+        [Fact]
+        public async Task RetryOnNetworkErrors為true_第一次網路失敗第二次成功()
+        {
+            var handler = new RecordingHandler
+            {
+                ThrowOnSend = new HttpRequestException("DNS 失敗"),
+                ThrowOnSendCount = 1,
+            };
+            handler.EnqueueJson("{\"emailAddress\":\"user@example.com\"}");
+
+            var options = new GmailClientOptions
+            {
+                MaxRetries = 3,
+                RetryBaseDelay = TimeSpan.Zero,
+                RetryOnNetworkErrors = true,
+            };
+            var client = GmailTestFactory.CreateClient(handler, options);
+
+            var profile = await client.GetProfileAsync();
+
+            Assert.Equal(2, handler.RequestCount);
+            Assert.Equal("user@example.com", profile.EmailAddress);
+        }
+
+        [Fact]
+        public async Task RetryOnNetworkErrors為true_重試用盡後拋出的仍是HttpRequestException()
+        {
+            var handler = new RecordingHandler { ThrowOnSend = new HttpRequestException("DNS 失敗") };
+            var options = new GmailClientOptions
+            {
+                MaxRetries = 2,
+                RetryBaseDelay = TimeSpan.Zero,
+                RetryOnNetworkErrors = true,
+            };
+            var client = GmailTestFactory.CreateClient(handler, options);
+
+            var exception = await Assert.ThrowsAsync<HttpRequestException>(() => client.GetProfileAsync());
+
+            Assert.Equal(3, handler.RequestCount);
+            Assert.Equal("DNS 失敗", exception.Message);
+        }
+
+        [Fact]
+        public async Task RetryOnNetworkErrors為true_取消仍然不重試()
+        {
+            using var cancellation = new CancellationTokenSource();
+            var handler = new RecordingHandler();
+            handler.OnRequest = _ => cancellation.Cancel();
+            handler.EnqueueError((HttpStatusCode)429   /* net48 沒有 TooManyRequests 列舉值 */, "{}");
+
+            var options = new GmailClientOptions
+            {
+                MaxRetries = 3,
+                RetryBaseDelay = TimeSpan.Zero,
+                RetryOnNetworkErrors = true,
+            };
+            var client = GmailTestFactory.CreateClient(handler, options);
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => client.GetProfileAsync(cancellation.Token));
+            Assert.Equal(1, handler.RequestCount);
         }
     }
 }

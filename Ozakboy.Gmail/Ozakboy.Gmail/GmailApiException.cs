@@ -82,6 +82,7 @@ namespace Ozakboy.Gmail
         /// <param name="requestMethod">HTTP 方法。The HTTP method.</param>
         /// <param name="requestPath">路徑加查詢字串,不含主機。The path and query, without the host.</param>
         /// <param name="isHistoryRequest">是否為 history.list 請求,決定 404 是否代表歷程過期。Whether this was a history.list call, which decides whether a 404 means expired history.</param>
+        /// <param name="retryAfter">最後一次失敗回應的 Retry-After,沒有這個標頭時為 null。The Retry-After of the final failed response; null when the header was absent.</param>
         internal GmailApiException(
             int statusCode,
             string? reason,
@@ -89,7 +90,8 @@ namespace Ozakboy.Gmail
             string? responseBody,
             string? requestMethod,
             string? requestPath,
-            bool isHistoryRequest)
+            bool isHistoryRequest,
+            TimeSpan? retryAfter = null)
             : base(BuildMessage(statusCode, reason, errorMessage, requestMethod, requestPath))
         {
             StatusCode = statusCode;
@@ -98,6 +100,7 @@ namespace Ozakboy.Gmail
             ResponseBody = responseBody;
             RequestMethod = requestMethod;
             RequestPath = requestPath;
+            RetryAfter = retryAfter;
 
             IsUnauthorized = statusCode == 401
                 || string.Equals(reason, InvalidGrant, StringComparison.Ordinal)
@@ -147,6 +150,16 @@ namespace Ozakboy.Gmail
         /// The request path plus query string, without the host.
         /// </summary>
         public string? RequestPath { get; }
+
+        /// <summary>
+        /// 最後一次失敗回應的 Retry-After(秒數與 HTTP 日期兩種格式都會換算成時間長度);沒有這個標頭、或例外不是由 HTTP 回應建立時為 null。
+        /// The Retry-After of the final failed response, with both the seconds and the HTTP-date form converted to a duration; null when the header was absent or the exception did not come from an HTTP response.
+        /// </summary>
+        /// <remarks>
+        /// 這個值用來在工作層級退避:重試已經在套件內用盡,或建議等待時間超過 <see cref="GmailClientOptions.MaxRetryDelay"/> 而直接放棄等待。
+        /// Use it to back off at the job level: the in-library retries are already exhausted, or the suggested wait exceeded <see cref="GmailClientOptions.MaxRetryDelay"/> and was not waited out.
+        /// </remarks>
+        public TimeSpan? RetryAfter { get; }
 
         /// <summary>
         /// 是否需要重新授權:401,或 OAuth 的 invalid_grant / invalid_token。

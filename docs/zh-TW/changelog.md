@@ -10,6 +10,32 @@ description: Ozakboy.Gmail 所有重要變更。
 
 ---
 
+## [2.1.0] - 2026-09-04
+
+> 回填更快、討論串端點、內文 / 附件 helper、現成的 access token 提供者、更細的重試控制。**沒有破壞性變更。**
+
+### 新增功能
+
+- **`BatchGetMessagesAsync(ids, format, metadataHeaders)`**——經 Gmail batch 端點(`multipart/mixed`)一次抓多封,每個 HTTP 請求最多 `GmailClientOptions.BatchSize`(預設 50)封、自動分段。回 `GmailBatchGetResult`:`Messages` 與逐 id 的 `Failures`(`IsNotFound`、`IsRateLimited`),中途有一封被刪不會讓整批失敗。
+- **討論串端點**——`GetThreadAsync`、`ModifyThreadAsync`、`TrashThreadAsync`、`UntrashThreadAsync`,搭配 `GmailThread` 模型。
+- **`GmailMessage.GetTextBody()` / `GetHtmlBody()`**——走訪 Gmail 已拆好的 MIME 部件,回第一個非附件內文、已解碼。**`GmailMessage.GetAttachments()`**——所有附件部件以 `GmailAttachmentInfo` 呈現(部件 id、檔名、MIME 型別、大小、attachment id、`Content-ID`、原始部件)。
+- **`GoogleAccessTokenProvider`**(`Ozakboy.Gmail.OAuth`)——快取 access token、到期前續期(`RefreshSkew`,預設 2 分鐘)、續期序列化(二十個呼叫者只發一次 token 請求),每次續期經 `OnRefreshed` 回報供落庫。把 `provider.GetAccessTokenAsync` 交給 `GmailClient` 即可。
+- **`GmailApiException.RetryAfter`**——最後一次失敗回應的 `Retry-After` 值,供 job 層退避。
+- **`GmailClientOptions.MaxRetryDelay`**(預設 60 秒)——退避或 `Retry-After` 超過它就不等,立即拋例外並帶 `RetryAfter`。**`GmailClientOptions.RetryOnNetworkErrors`**(預設 `false`)——以同一套退避重試 `HttpRequestException`;用盡後最後一個仍原樣上拋。
+
+> **給自行實作 `IGmailClient` 的人:** 介面多了五個成員(`BatchGetMessagesAsync`、`GetThreadAsync`、`ModifyThreadAsync`、`TrashThreadAsync`、`UntrashThreadAsync`)。只*使用* `GmailClient` / `IGmailClient` 的程式不受影響;手寫的 fake / mock 若*實作*了這個介面要補上新成員。因為套件目前還沒有外部實作者,所以以 Minor 發佈。
+
+### 問題修正
+
+- **.NET Framework 上 204 No Content 拋 `NullReferenceException`。** `HttpResponseMessage.Content` 在 .NET Framework 可能是 `null`(.NET Core 永遠是空內容),`BatchModifyLabelsAsync`、`DeleteLabelAsync`、`RevokeAsync` 在 `net48` 等 netstandard2.0 宿主會炸。由新加的 `net48` 測試目標抓到。
+
+### 技術改進
+
+- 測試專案改為 `net10.0` **與** `net48` 雙目標;每個測試也對 `netstandard2.0` 組建跑一遍。
+- GitHub Actions workflow `build-test.yml`:push `main` 與每個 pull request 都跑五個 TFM 的 Release 建置(警告視為錯誤)與兩個測試目標。
+
+---
+
 ## [2.0.0] - 2026-09-03
 
 > **不再相依 MimeKit。** 寄出的信由內建 RFC 822 組信器組裝,或以 raw bytes 交入;原始信改以 bytes 回傳。**破壞性變更**:兩個簽章改了——見[升級指南](./migration.md)。其餘與 1.0.0 完全相同。

@@ -71,16 +71,20 @@ GoogleTokenResponse token = await oauth.ExchangeCodeAsync(code, redirectUri);
 var who = GoogleIdTokenPayload.Parse(token.IdToken!);         // who.Subject, who.Email
 // store token.RefreshToken (encrypted), token.AccessToken, token.ExpiresAt
 
-// 3. later, before ExpiresAt
-GoogleTokenResponse fresh = await oauth.RefreshAsync(refreshToken);
+// 3. later: a provider that caches, refreshes ahead of expiry and tells you when to persist
+var provider = new GoogleAccessTokenProvider(oauth, refreshToken, new GoogleAccessTokenProviderOptions
+{
+    OnRefreshed = (fresh, ct) => store.SaveAsync(fresh.AccessToken!, fresh.ExpiresAt, ct),
+});
+IGmailClient gmail = new GmailClient(httpClient, provider.GetAccessTokenAsync);
 ```
 
 ## What this is
 
 A deliberately thin layer over two Google HTTP APIs:
 
-- **`GmailClient`** — profile, list / get messages (metadata, full, or the raw RFC 822 bytes), `history.list` for incremental sync, modify / batch-modify labels, trash / untrash, report spam, labels CRUD, attachments, and `messages.send` — with a built-in RFC 822 writer (`GmailOutgoingMessage`) or your own bytes (`SendRawAsync`)
-- **`GoogleOAuthClient`** — authorization URL, code exchange, refresh, revoke, and reading the `id_token` claims
+- **`GmailClient`** — profile, list / get messages (metadata, full, or the raw RFC 822 bytes), `history.list` for incremental sync, batch get for backfills, threads, modify / batch-modify labels, trash / untrash, report spam, labels CRUD, attachments, and `messages.send` — with a built-in RFC 822 writer (`GmailOutgoingMessage`) or your own bytes (`SendRawAsync`)
+- **`GoogleOAuthClient`** — authorization URL, code exchange, refresh, revoke, and reading the `id_token` claims; **`GoogleAccessTokenProvider`** keeps one mailbox's access token cached and refreshed for you
 - **`GmailApiException`** — every non-2xx response, with Google's error reason and four flags a sync loop needs: `IsUnauthorized`, `IsHistoryExpired`, `IsRateLimited`, `IsNotFound`
 
 And what it is **not**: it does not store or encrypt tokens, does not watch Pub/Sub, does not delete permanently, does not speak IMAP or SMTP, does not cover other Google APIs, and does not classify mail. Those live in your application.

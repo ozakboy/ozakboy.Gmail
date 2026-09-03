@@ -1,6 +1,6 @@
 ---
 title: 快速開始
-description: 安裝 Ozakboy.Gmail 2.0.0,用 Google OAuth 連接 Gmail 帳號,讀出第一批信。
+description: 安裝 Ozakboy.Gmail 2.1.0,用 Google OAuth 連接 Gmail 帳號,讀出第一批信。
 ---
 
 # 快速開始
@@ -8,7 +8,7 @@ description: 安裝 Ozakboy.Gmail 2.0.0,用 Google OAuth 連接 Gmail 帳號,讀
 ## 安裝
 
 ```bash
-dotnet add package Ozakboy.Gmail --version 2.0.0
+dotnet add package Ozakboy.Gmail --version 2.1.0
 ```
 
 支援的目標框架:`netstandard2.0`、`netstandard2.1`、`net8.0`、`net9.0`、`net10.0`。
@@ -113,24 +113,24 @@ string email        = identity.Email!;
 
 ## 4. 提供 access token
 
-`GmailClient` 每個請求呼叫一次你的提供者。典型寫法是回傳快取的 access token,在 `ExpiresAt` 前一點續期:
+`GmailClient` 每個請求呼叫一次你的提供者。2.1.0 起套件自帶一個:`GoogleAccessTokenProvider` 會快取 access token、在 `ExpiresAt` 前兩分鐘續期、確保並發呼叫只觸發一次續期,並把每個新 token 交給 `OnRefreshed` 讓你存起來:
 
 ```csharp
-Func<CancellationToken, Task<string>> provider = async ct =>
+var account = await store.LoadAsync(accountId, ct);
+
+var provider = new GoogleAccessTokenProvider(oauthClient, account.RefreshToken, new GoogleAccessTokenProviderOptions
 {
-    var account = await store.LoadAsync(accountId, ct);
-    if (account.ExpiresAt > DateTimeOffset.UtcNow.AddMinutes(2))
-        return account.AccessToken;
+    InitialAccessToken = account.AccessToken,       // 手上的還沒過期就直接用
+    InitialExpiresAt   = account.ExpiresAt,
+    OnRefreshed        = (token, c) => store.SaveAccessTokenAsync(accountId, token.AccessToken!, token.ExpiresAt, c),
+});
 
-    var refreshed = await oauthClient.RefreshAsync(account.RefreshToken, ct);   // 回應的 RefreshToken 為 null——繼續用你手上的
-    await store.SaveAccessTokenAsync(accountId, refreshed.AccessToken!, refreshed.ExpiresAt, ct);
-    return refreshed.AccessToken!;
-};
-
-IGmailClient gmail = new GmailClient(httpClient, provider);
+IGmailClient gmail = new GmailClient(httpClient, provider.GetAccessTokenAsync);
 ```
 
-`RefreshAsync` 拋出 `IsUnauthorized == true` 的 `GmailApiException` 代表 refresh token 本身已被撤銷或過期——把帳號標成需要重新授權,再走一次第 3 步。
+每個連接中的信箱留一個 provider,帳號連著就一直用。想自己寫也行——任何 `Func<CancellationToken, Task<string>>` 都還是可以,委派契約沒變。
+
+`RefreshAsync`(或 provider)拋出 `IsUnauthorized == true` 的 `GmailApiException` 代表 refresh token 本身已被撤銷或過期——把帳號標成需要重新授權,再走一次第 3 步。
 
 ## 5. 讀信箱
 
@@ -158,6 +158,32 @@ do
 
     pageToken = page.NextPageToken;
 } while (pageToken != null);
+```
+
+幾封信一封一封 `GetMessageAsync` 沒問題;回填幾百封請用 batch 端點(2.1.0)——每 50 封一趟 HTTP 來回,中途被刪的信也不會讓整批失敗:
+
+```csharp
+GmailBatchGetResult batch = await gmail.BatchGetMessagesAsync(
+    page.Messages.Select(m => m.Id!),
+    GmailMessageFormat.Metadata,
+    new[] { "From", "Subject", "List-Unsubscribe", "Authentication-Results" },
+    ct);
+
+foreach (GmailMessage message in batch.Messages)
+    Console.WriteLine($"{message.InternalDateTime:u}  {message.GetHeader("From")}  {message.GetHeader("Subject")}");
+
+foreach (GmailBatchFailure failure in batch.Failures.Where(f => f.IsRateLimited))
+    retryQueue.Enqueue(failure.Id!);   // notFound 的就是不見了——跳過
+```
+
+真的要正文時,`GetMessageAsync(id, GmailMessageFormat.Full)` 加 2.1.0 的 helper 就不用自己走 MIME 樹:
+
+```csharp
+GmailMessage full = await gmail.GetMessageAsync(id, GmailMessageFormat.Full, cancellationToken: ct);
+string? text = full.GetTextBody();
+string? html = full.GetHtmlBody();
+foreach (GmailAttachmentInfo info in full.GetAttachments())
+    Console.WriteLine($"{info.FileName}({info.MimeType},{info.Size} bytes,attachmentId {info.AttachmentId})");
 ```
 
 ## 6. 增量同步

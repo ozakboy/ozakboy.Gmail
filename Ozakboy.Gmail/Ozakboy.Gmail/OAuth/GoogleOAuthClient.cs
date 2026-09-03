@@ -76,7 +76,7 @@ namespace Ozakboy.Gmail.OAuth
         /// <param name="clientOptions">重試設定,null 視同預設值。The retry settings; null means the defaults.</param>
         /// <exception cref="ArgumentNullException"><paramref name="httpClient"/> 或 <paramref name="options"/> 為 null 時擲出。Thrown when <paramref name="httpClient"/> or <paramref name="options"/> is null.</exception>
         /// <exception cref="ArgumentException">ClientId 或 ClientSecret 為空白時擲出。Thrown when ClientId or ClientSecret is blank.</exception>
-        /// <exception cref="ArgumentOutOfRangeException"><paramref name="clientOptions"/> 的 MaxRetries 為負值時擲出。Thrown when MaxRetries on <paramref name="clientOptions"/> is negative.</exception>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="clientOptions"/> 的 MaxRetries 或 MaxRetryDelay 為負值時擲出。Thrown when MaxRetries or MaxRetryDelay on <paramref name="clientOptions"/> is negative.</exception>
         public GoogleOAuthClient(HttpClient httpClient, GoogleOAuthOptions options, GmailClientOptions? clientOptions)
         {
             if (httpClient == null)
@@ -95,11 +95,16 @@ namespace Ozakboy.Gmail.OAuth
             if (maxRetries < 0)
                 throw new ArgumentOutOfRangeException(nameof(clientOptions), maxRetries, "MaxRetries 不可為負值。MaxRetries cannot be negative.");
 
+            var maxRetryDelay = clientOptions == null ? new GmailClientOptions().MaxRetryDelay : clientOptions.MaxRetryDelay;
+            if (maxRetryDelay.HasValue && maxRetryDelay.Value < TimeSpan.Zero)
+                throw new ArgumentOutOfRangeException(nameof(clientOptions), maxRetryDelay, "MaxRetryDelay 不可為負值。MaxRetryDelay cannot be negative.");
+
             var retryBaseDelay = clientOptions == null ? new GmailClientOptions().RetryBaseDelay : clientOptions.RetryBaseDelay;
+            var retryOnNetworkErrors = clientOptions != null && clientOptions.RetryOnNetworkErrors;
 
             _clientId = options.ClientId;
             _clientSecret = options.ClientSecret;
-            _http = new GmailHttp(httpClient, null, new RetryPolicy(maxRetries, retryBaseDelay));
+            _http = new GmailHttp(httpClient, null, new RetryPolicy(maxRetries, retryBaseDelay, maxRetryDelay, retryOnNetworkErrors));
         }
 
         /// <inheritdoc />

@@ -63,11 +63,25 @@ namespace Ozakboy.Gmail.Core
         internal async Task<T> SendForJsonAsync<T>(Func<HttpRequestMessage> requestFactory, bool isHistoryRequest, CancellationToken cancellationToken)
             where T : class, new()
         {
-            var body = await SendCoreAsync(requestFactory, isHistoryRequest, cancellationToken).ConfigureAwait(false);
-            if (string.IsNullOrWhiteSpace(body))
+            var raw = await SendCoreAsync(requestFactory, isHistoryRequest, cancellationToken).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(raw.Body))
                 return new T();
 
-            return GmailJson.Deserialize<T>(body) ?? new T();
+            return GmailJson.Deserialize<T>(raw.Body) ?? new T();
+        }
+
+        /// <summary>
+        /// 送出請求並回傳未經解析的回應主體與 Content-Type,供 batch 端點取出 multipart 的 boundary。
+        /// Sends the request and returns the unparsed response body plus its Content-Type, which the batch endpoint needs to find the multipart boundary.
+        /// </summary>
+        /// <param name="requestFactory">請求工廠,每次嘗試都會呼叫一次以建立全新的請求。The request factory, invoked once per attempt to build a fresh request.</param>
+        /// <param name="cancellationToken">取消權杖。Cancellation token.</param>
+        /// <returns>原始回應內容,永不為 null。The raw response content; never null.</returns>
+        /// <exception cref="GmailApiException">重試用盡後仍收到非 2xx 回應時擲出。Thrown when a non-2xx response remains after retries are exhausted.</exception>
+        /// <exception cref="InvalidOperationException">存取權杖提供者回傳 null 或空字串時擲出。Thrown when the access token provider returns null or an empty string.</exception>
+        internal Task<GmailRawResponse> SendForRawAsync(Func<HttpRequestMessage> requestFactory, CancellationToken cancellationToken)
+        {
+            return SendCoreAsync(requestFactory, false, cancellationToken);
         }
 
         /// <summary>
@@ -92,10 +106,11 @@ namespace Ozakboy.Gmail.Core
         /// <param name="requestFactory">請求工廠。The request factory.</param>
         /// <param name="isHistoryRequest">是否為 history.list 請求。Whether this is a history.list call.</param>
         /// <param name="cancellationToken">取消權杖。Cancellation token.</param>
-        /// <returns>回應主體字串,可能為空字串。The response body; possibly an empty string.</returns>
+        /// <returns>原始回應內容,永不為 null。The raw response content; never null.</returns>
         /// <exception cref="GmailApiException">重試用盡後仍收到非 2xx 回應時擲出。Thrown when a non-2xx response remains after retries are exhausted.</exception>
         /// <exception cref="InvalidOperationException">存取權杖提供者回傳 null 或空字串時擲出。Thrown when the access token provider returns null or an empty string.</exception>
-        private async Task<string> SendCoreAsync(Func<HttpRequestMessage> requestFactory, bool isHistoryRequest, CancellationToken cancellationToken)
+        /// <exception cref="HttpRequestException">傳輸層失敗且未啟用網路錯誤重試(或重試已用盡)時原樣上拋。Rethrown as-is when the transport fails and network-error retries are disabled or already exhausted.</exception>
+        private async Task<GmailRawResponse> SendCoreAsync(Func<HttpRequestMessage> requestFactory, bool isHistoryRequest, CancellationToken cancellationToken)
         {
             // 權杖只在整個呼叫的最前面取一次,重試沿用同一個權杖
             // The token is obtained once for the whole call; retries reuse the very same token.
@@ -118,27 +133,55 @@ namespace Ozakboy.Gmail.Core
                     if (accessToken != null)
                         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
 
-                    using (var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false))
+                    HttpResponseMessage response;
+                    try
+                    {
+                        response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (HttpRequestException) when (_retryPolicy.RetryOnNetworkErrors && attempt < _retryPolicy.MaxRetries)
+                    {
+                        // 傳輸層失敗沒有 Retry-After 可參考,只能套指數退避;取消不會走到這裡(那是 OperationCanceledException)
+                        // A transport failure carries no Retry-After, so only the exponential backoff applies; cancellation never lands here because it is an OperationCanceledException.
+                        attempt++;
+                        var networkDelay = _retryPolicy.GetDelay(attempt, null);
+                        if (_retryPolicy.ExceedsMaxDelay(networkDelay))
+                            throw;
+
+                        await Task.Delay(networkDelay, cancellationToken).ConfigureAwait(false);
+                        continue;
+                    }
+
+                    using (response)
                     {
                         if (response.IsSuccessStatusCode)
-                            return await ReadContentAsync(response, cancellationToken).ConfigureAwait(false);
+                        {
+                            var successBody = await ReadContentAsync(response, cancellationToken).ConfigureAwait(false);
+                            return new GmailRawResponse((int)response.StatusCode, successBody, GetContentType(response));
+                        }
 
                         var responseBody = await TryReadContentAsync(response, cancellationToken).ConfigureAwait(false);
                         var error = GoogleErrorBody.Parse(responseBody);
                         var statusCode = (int)response.StatusCode;
+                        var retryAfter = GetRetryAfter(response);
 
                         if (attempt < _retryPolicy.MaxRetries && RetryPolicy.IsRetryable(statusCode, error.Reason))
                         {
-                            attempt++;
-                            var delay = _retryPolicy.GetDelay(attempt, GetRetryAfter(response));
+                            var delay = _retryPolicy.GetDelay(attempt + 1, retryAfter);
 
-                            // 即使延遲為零也走 Task.Delay,取消才會在等待階段被觀察到
-                            // Task.Delay is awaited even for a zero delay so cancellation is still observed while waiting.
-                            await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
-                            continue;
+                            // 建議等待時間超過上限就不再等,直接失敗讓呼叫端在工作層級退避
+                            // A suggested wait beyond the cap is not waited out; the call fails so the caller can back off at the job level.
+                            if (!_retryPolicy.ExceedsMaxDelay(delay))
+                            {
+                                attempt++;
+
+                                // 即使延遲為零也走 Task.Delay,取消才會在等待階段被觀察到
+                                // Task.Delay is awaited even for a zero delay so cancellation is still observed while waiting.
+                                await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+                                continue;
+                            }
                         }
 
-                        throw CreateException(request, statusCode, error, responseBody, isHistoryRequest);
+                        throw CreateException(request, statusCode, error, responseBody, isHistoryRequest, retryAfter);
                     }
                 }
             }
@@ -153,13 +196,15 @@ namespace Ozakboy.Gmail.Core
         /// <param name="error">解析後的錯誤內容。The parsed error body.</param>
         /// <param name="responseBody">原始回應主體,可為 null。The raw response body; may be null.</param>
         /// <param name="isHistoryRequest">是否為 history.list 請求。Whether this is a history.list call.</param>
+        /// <param name="retryAfter">回應的 Retry-After,沒有這個標頭時為 null。The response's Retry-After; null when the header is absent.</param>
         /// <returns>組裝完成的例外。The assembled exception.</returns>
         private static GmailApiException CreateException(
             HttpRequestMessage request,
             int statusCode,
             GoogleErrorBody error,
             string? responseBody,
-            bool isHistoryRequest)
+            bool isHistoryRequest,
+            TimeSpan? retryAfter)
         {
             var method = request.Method.Method;
             var path = request.RequestUri == null ? string.Empty : request.RequestUri.PathAndQuery;
@@ -171,7 +216,22 @@ namespace Ozakboy.Gmail.Core
                 string.IsNullOrEmpty(responseBody) ? null : responseBody,
                 method,
                 path,
-                isHistoryRequest);
+                isHistoryRequest,
+                retryAfter);
+        }
+
+        /// <summary>
+        /// 取出回應的 Content-Type 標頭值,沒有內容時為 null。
+        /// Reads the response's Content-Type header value; null when the response carried no content.
+        /// </summary>
+        /// <param name="response">HTTP 回應。The HTTP response.</param>
+        /// <returns>Content-Type 字串或 null。The Content-Type string, or null.</returns>
+        private static string? GetContentType(HttpResponseMessage response)
+        {
+            // .NET Framework 的空回應 Content 可能是 null,比照 ReadContentAsync 一併防掉
+            // On .NET Framework the Content of an empty response can be null, guarded here the same way ReadContentAsync does.
+            var contentType = response.Content?.Headers.ContentType;
+            return contentType?.ToString();
         }
 
         /// <summary>
@@ -207,6 +267,11 @@ namespace Ozakboy.Gmail.Core
         /// <returns>回應主體。The response body.</returns>
         private static async Task<string> ReadContentAsync(HttpResponseMessage response, CancellationToken cancellationToken)
         {
+            // .NET Framework 對 204 / 空回應的 Content 可能是 null(.NET Core 永遠是 EmptyContent),不防會 NullReferenceException
+            // On .NET Framework the Content of a 204 / empty response can be null (.NET Core always gives EmptyContent); guard it.
+            if (response.Content == null)
+                return string.Empty;
+
 #if NETSTANDARD2_0 || NETSTANDARD2_1
             // netstandard 的 HttpContent 沒有吃 CancellationToken 的多載
             // The netstandard HttpContent has no overload taking a CancellationToken.

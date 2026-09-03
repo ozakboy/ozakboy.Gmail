@@ -62,6 +62,32 @@ namespace Ozakboy.Gmail
             CancellationToken cancellationToken = default);
 
         /// <summary>
+        /// 透過 Gmail 的批次端點一次取回多封郵件。識別碼會依 <see cref="GmailClientOptions.BatchSize"/> 自動分段,逐段循序送出。
+        /// Fetches many messages through Gmail's batch endpoint. The ids are chunked by <see cref="GmailClientOptions.BatchSize"/> automatically and the chunks are sent one after another.
+        /// </summary>
+        /// <remarks>
+        /// 單筆失敗(郵件已刪、單筆被限流)不會讓整批失敗,而是收進 <see cref="GmailBatchGetResult.Failures"/>;
+        /// 這些失敗**不會**自動重試,要不要重排由呼叫端依 <see cref="GmailBatchFailure.IsRateLimited"/> 決定。
+        /// 外層請求本身仍套用一般的重試策略與錯誤映射。
+        /// A single failure (a deleted message, a per-item rate limit) does not fail the batch; it lands in <see cref="GmailBatchGetResult.Failures"/> instead.
+        /// Those failures are **not** retried automatically; requeueing them stays the caller's decision, guided by <see cref="GmailBatchFailure.IsRateLimited"/>.
+        /// The outer request still goes through the usual retry policy and error mapping.
+        /// </remarks>
+        /// <param name="ids">要取回的郵件識別碼;空序列時不送任何請求並回傳空結果。The message ids; an empty sequence sends nothing and yields an empty result.</param>
+        /// <param name="format">要回傳多少內容,預設為完整內容。How much content to return; defaults to the full message.</param>
+        /// <param name="metadataHeaders">只在 <see cref="GmailMessageFormat.Metadata"/> 下送出,用來限制回傳哪些標頭。Only sent with <see cref="GmailMessageFormat.Metadata"/>, limiting which headers come back.</param>
+        /// <param name="cancellationToken">取消權杖。Cancellation token.</param>
+        /// <returns>成功取回的郵件與逐筆失敗紀錄,兩個清單都永不為 null。The messages that came back plus the per-item failures; neither list is ever null.</returns>
+        /// <exception cref="System.ArgumentNullException"><paramref name="ids"/> 為 null 時擲出。Thrown when <paramref name="ids"/> is null.</exception>
+        /// <exception cref="System.ArgumentException"><paramref name="ids"/> 含 null 或空白的識別碼時擲出。Thrown when <paramref name="ids"/> holds a null or blank id.</exception>
+        /// <exception cref="GmailApiException">外層請求回傳非 2xx,或回應不是可解析的 multipart(此時 Reason 為 "batchParseError")時擲出。Thrown when the outer request answers with a non-2xx status, or the response is not parsable multipart, in which case Reason is "batchParseError".</exception>
+        Task<GmailBatchGetResult> BatchGetMessagesAsync(
+            IEnumerable<string> ids,
+            GmailMessageFormat format = GmailMessageFormat.Full,
+            IEnumerable<string>? metadataHeaders = null,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
         /// 以 format=raw 取回郵件,回傳 base64url 解碼後的完整 RFC 822 位元組;可交給任何 MIME 函式庫解析。
         /// Fetches the message with format=raw and returns the base64url-decoded RFC 822 bytes, ready for any MIME parser.
         /// </summary>
@@ -160,6 +186,62 @@ namespace Ozakboy.Gmail
         /// <exception cref="System.ArgumentException"><paramref name="id"/> 為 null 或空白時擲出。Thrown when <paramref name="id"/> is null or blank.</exception>
         /// <exception cref="GmailApiException">Gmail 回傳非 2xx 時擲出。Thrown when Gmail answers with a non-2xx status.</exception>
         Task<GmailMessage> ReportSpamAsync(string id, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// 取得單一討論串,含串上的所有郵件。
+        /// Gets a single thread together with every message on it.
+        /// </summary>
+        /// <param name="id">討論串識別碼,null 或空字串時擲出例外。The thread id; null or empty throws.</param>
+        /// <param name="format">要回傳多少內容,預設為完整內容。How much content to return; defaults to the full messages.</param>
+        /// <param name="metadataHeaders">只在 <see cref="GmailMessageFormat.Metadata"/> 下送出,用來限制回傳哪些標頭。Only sent with <see cref="GmailMessageFormat.Metadata"/>, limiting which headers come back.</param>
+        /// <param name="cancellationToken">取消權杖。Cancellation token.</param>
+        /// <returns>討論串內容,<see cref="GmailThread.Messages"/> 永不為 null。The thread; <see cref="GmailThread.Messages"/> is never null.</returns>
+        /// <exception cref="System.ArgumentException"><paramref name="id"/> 為 null 或空白時擲出。Thrown when <paramref name="id"/> is null or blank.</exception>
+        /// <exception cref="GmailApiException">Gmail 回傳非 2xx 時擲出。Thrown when Gmail answers with a non-2xx status.</exception>
+        Task<GmailThread> GetThreadAsync(
+            string id,
+            GmailMessageFormat format = GmailMessageFormat.Full,
+            IEnumerable<string>? metadataHeaders = null,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// 修改整個討論串的標籤,變更會套用到串上的每一封郵件。
+        /// Changes the labels on a whole thread; the change applies to every message on it.
+        /// </summary>
+        /// <param name="id">討論串識別碼,null 或空字串時擲出例外。The thread id; null or empty throws.</param>
+        /// <param name="addLabelIds">要加上的標籤,可為 null 或空序列。The labels to add; may be null or empty.</param>
+        /// <param name="removeLabelIds">要移除的標籤,可為 null 或空序列。The labels to remove; may be null or empty.</param>
+        /// <param name="cancellationToken">取消權杖。Cancellation token.</param>
+        /// <returns>更新後的討論串。The updated thread.</returns>
+        /// <exception cref="System.ArgumentException">識別碼為空白,或兩個標籤清單都是 null / 空序列時擲出。Thrown when the id is blank, or both label lists are null or empty.</exception>
+        /// <exception cref="GmailApiException">Gmail 回傳非 2xx 時擲出。Thrown when Gmail answers with a non-2xx status.</exception>
+        Task<GmailThread> ModifyThreadAsync(
+            string id,
+            IEnumerable<string>? addLabelIds,
+            IEnumerable<string>? removeLabelIds,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// 把整個討論串移到垃圾桶(30 天內可還原)。
+        /// Moves a whole thread to the trash; it is recoverable for 30 days.
+        /// </summary>
+        /// <param name="id">討論串識別碼,null 或空字串時擲出例外。The thread id; null or empty throws.</param>
+        /// <param name="cancellationToken">取消權杖。Cancellation token.</param>
+        /// <returns>更新後的討論串。The updated thread.</returns>
+        /// <exception cref="System.ArgumentException"><paramref name="id"/> 為 null 或空白時擲出。Thrown when <paramref name="id"/> is null or blank.</exception>
+        /// <exception cref="GmailApiException">Gmail 回傳非 2xx 時擲出。Thrown when Gmail answers with a non-2xx status.</exception>
+        Task<GmailThread> TrashThreadAsync(string id, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// 把整個討論串從垃圾桶還原。
+        /// Restores a whole thread from the trash.
+        /// </summary>
+        /// <param name="id">討論串識別碼,null 或空字串時擲出例外。The thread id; null or empty throws.</param>
+        /// <param name="cancellationToken">取消權杖。Cancellation token.</param>
+        /// <returns>更新後的討論串。The updated thread.</returns>
+        /// <exception cref="System.ArgumentException"><paramref name="id"/> 為 null 或空白時擲出。Thrown when <paramref name="id"/> is null or blank.</exception>
+        /// <exception cref="GmailApiException">Gmail 回傳非 2xx 時擲出。Thrown when Gmail answers with a non-2xx status.</exception>
+        Task<GmailThread> UntrashThreadAsync(string id, CancellationToken cancellationToken = default);
 
         /// <summary>
         /// 列出信箱中的所有標籤(系統與使用者標籤都包含)。

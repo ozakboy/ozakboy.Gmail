@@ -1,7 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <!-- net48 吃的是主函式庫的 netstandard2.0 組建,用來驗證 ns2.0 條件編譯路徑在 .NET Framework 執行時期的行為 -->
+    <TargetFrameworks>net10.0;net48</TargetFrameworks>
     <LangVersion>latest</LangVersion>
     <AssemblyName>Ozakboy.Gmail.Tests</AssemblyName>
     <RootNamespace>Ozakboy.Gmail.Tests</RootNamespace>

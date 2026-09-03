@@ -42,6 +42,63 @@ namespace Ozakboy.Gmail.Tests
             Assert.Throws<ArgumentOutOfRangeException>(() => new GmailClient(httpClient, _ => Task.FromResult("token"), options));
         }
 
+        [Theory]
+        [InlineData(0)]
+        [InlineData(-1)]
+        [InlineData(101)]
+        public void 建構子_BatchSize超出範圍_拋出ArgumentOutOfRangeException(int batchSize)
+        {
+            using var httpClient = new HttpClient();
+            var options = new GmailClientOptions { BatchSize = batchSize };
+
+            Assert.Throws<ArgumentOutOfRangeException>(() => new GmailClient(httpClient, _ => Task.FromResult("token"), options));
+        }
+
+        [Theory]
+        [InlineData(1)]
+        [InlineData(50)]
+        [InlineData(100)]
+        public void 建構子_BatchSize在範圍內_可正常建立(int batchSize)
+        {
+            using var httpClient = new HttpClient();
+            var options = new GmailClientOptions { BatchSize = batchSize };
+
+            Assert.NotNull(new GmailClient(httpClient, _ => Task.FromResult("token"), options));
+        }
+
+        [Fact]
+        public void 建構子_MaxRetryDelay為負值_拋出ArgumentOutOfRangeException()
+        {
+            using var httpClient = new HttpClient();
+            var options = new GmailClientOptions { MaxRetryDelay = TimeSpan.FromSeconds(-1) };
+
+            Assert.Throws<ArgumentOutOfRangeException>(() => new GmailClient(httpClient, _ => Task.FromResult("token"), options));
+        }
+
+        [Fact]
+        public void 建構子_MaxRetryDelay為null_可正常建立()
+        {
+            using var httpClient = new HttpClient();
+            var options = new GmailClientOptions { MaxRetryDelay = null };
+
+            Assert.NotNull(new GmailClient(httpClient, _ => Task.FromResult("token"), options));
+        }
+
+        [Fact]
+        public void OAuth建構子_MaxRetryDelay為負值_拋出ArgumentOutOfRangeException()
+        {
+            using var httpClient = new HttpClient();
+            var oauthOptions = new Ozakboy.Gmail.OAuth.GoogleOAuthOptions
+            {
+                ClientId = "client-id.apps.googleusercontent.com",
+                ClientSecret = "client-secret",
+            };
+            var options = new GmailClientOptions { MaxRetryDelay = TimeSpan.FromSeconds(-1) };
+
+            Assert.Throws<ArgumentOutOfRangeException>(
+                () => new Ozakboy.Gmail.OAuth.GoogleOAuthClient(httpClient, oauthOptions, options));
+        }
+
         [Fact]
         public void 建構子_options為null_採用預設值()
         {

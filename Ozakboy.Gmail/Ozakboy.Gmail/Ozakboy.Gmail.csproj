@@ -19,10 +19,10 @@
     <PackageTags>gmail;gmail-api;google;oauth;oauth2;google-oauth;email;mail;rest;async;rfc822;mime;history;labels;dotnet;csharp;netstandard</PackageTags>
 
     <!-- 版本資訊 -->
-    <Version>2.0.0</Version>
-    <PackageVersion>2.0.0</PackageVersion>
-    <AssemblyVersion>2.0.0.0</AssemblyVersion>
-    <FileVersion>2.0.0.0</FileVersion>
+    <Version>2.1.0</Version>
+    <PackageVersion>2.1.0</PackageVersion>
+    <AssemblyVersion>2.1.0.0</AssemblyVersion>
+    <FileVersion>2.1.0.0</FileVersion>
 
     <!-- 專案連結 -->
     <PackageProjectUrl>https://github.com/ozakboy/ozakboy.Gmail</PackageProjectUrl>
@@ -53,20 +53,22 @@
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
 
     <PackageReleaseNotes>
-v2.0.0 — MimeKit is no longer a dependency. BREAKING: SendAsync now takes GmailOutgoingMessage instead of MimeKit.MimeMessage, and GetMessageRawAsync returns byte[] (the decoded RFC 822 message) instead of MimeMessage.
+v2.1.0 — faster backfill, thread endpoints, body / attachment helpers, a ready-made access-token provider, and finer retry control. No breaking changes.
 
 ADDED:
-- GmailOutgoingMessage — a small outgoing-mail model (From, To, Cc, Bcc, ReplyTo, Subject, TextBody, HtmlBody, Attachments, InReplyTo, References, extra Headers) with ToRfc822Bytes(): a built-in RFC 822 / MIME writer (UTF-8, base64 bodies and attachments, RFC 2047 encoded headers, multipart/alternative + multipart/mixed).
-- GmailAddress and GmailAttachmentContent (byte[] content) as the building blocks of GmailOutgoingMessage.
-- SendRawAsync(byte[] rfc822, threadId) — send a message composed by any MIME library of your choice.
-- GmailMessage.DecodeRaw() — the base64url-decoded RFC 822 bytes of a message fetched with GmailMessageFormat.Raw.
+- BatchGetMessagesAsync(ids, format, metadataHeaders) — fetches many messages through the Gmail batch endpoint (multipart/mixed, up to GmailClientOptions.BatchSize = 50 per HTTP request, chunked automatically). Returns GmailBatchGetResult with Messages and per-id Failures (deleted messages, per-item rate limits) instead of failing the whole batch.
+- Thread endpoints: GetThreadAsync, ModifyThreadAsync, TrashThreadAsync, UntrashThreadAsync, with the GmailThread model.
+- GmailMessage.GetTextBody() / GetHtmlBody() — walk the MIME parts Gmail already split and return the decoded body; GmailMessage.GetAttachments() — every attachment part as GmailAttachmentInfo (part id, file name, MIME type, size, attachment id, Content-ID).
+- GoogleAccessTokenProvider — caches the access token, refreshes it ahead of expiry (RefreshSkew, default 2 minutes), serialises concurrent refreshes, and reports each refresh through OnRefreshed so you can persist it. Pass provider.GetAccessTokenAsync to GmailClient.
+- GmailApiException.RetryAfter — the Retry-After value of the final failed response, for job-level backoff.
+- GmailClientOptions.MaxRetryDelay (default 60 s) — a Retry-After longer than this is not waited for; the exception is thrown immediately with RetryAfter set. GmailClientOptions.RetryOnNetworkErrors (default false) — retry HttpRequestException with the same backoff.
 
-CHANGED (BREAKING):
-- SendAsync(MimeMessage, threadId) → SendAsync(GmailOutgoingMessage, threadId). Build the message with GmailOutgoingMessage, or keep using MimeKit in your own project and call SendRawAsync with the serialised bytes.
-- GetMessageRawAsync(id) now returns Task&lt;byte[]&gt; — parse with any MIME library, or read parsed parts through GetMessageAsync(id, GmailMessageFormat.Full) as before.
-- The package no longer references MimeKit; remove any code that relied on it flowing in transitively.
+FIXED:
+- On .NET Framework, a 204 No Content response (batchModify, labels.delete, revoke) threw NullReferenceException because HttpResponseMessage.Content can be null there. Found by the new net48 test target.
 
-Migration guide: https://github.com/ozakboy/ozakboy.Gmail/blob/main/docs/en/migration.md
+TECHNICAL:
+- The test project now also targets net48 and runs every test against the netstandard2.0 build.
+
 Full changelog: https://github.com/ozakboy/ozakboy.Gmail/blob/main/docs/en/changelog.md
     </PackageReleaseNotes>
   </PropertyGroup>

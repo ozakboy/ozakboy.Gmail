@@ -71,16 +71,20 @@ GoogleTokenResponse token = await oauth.ExchangeCodeAsync(code, redirectUri);
 var who = GoogleIdTokenPayload.Parse(token.IdToken!);         // who.Subject、who.Email
 // 存 token.RefreshToken(加密)、token.AccessToken、token.ExpiresAt
 
-// 3. 之後,在 ExpiresAt 之前
-GoogleTokenResponse fresh = await oauth.RefreshAsync(refreshToken);
+// 3. 之後:一個會快取、提前續期、續完通知你存的 provider
+var provider = new GoogleAccessTokenProvider(oauth, refreshToken, new GoogleAccessTokenProviderOptions
+{
+    OnRefreshed = (fresh, ct) => store.SaveAsync(fresh.AccessToken!, fresh.ExpiresAt, ct),
+});
+IGmailClient gmail = new GmailClient(httpClient, provider.GetAccessTokenAsync);
 ```
 
 ## 這是什麼
 
 刻意做薄的一層,包兩組 Google HTTP API:
 
-- **`GmailClient`**——profile、列出 / 讀取信件(metadata、full,或 RFC 822 原始 bytes)、`history.list` 增量同步、修改 / 批次修改標籤、垃圾桶進出、回報垃圾信、標籤 CRUD、附件、`messages.send`——內建 RFC 822 組信器(`GmailOutgoingMessage`)或自己給 bytes(`SendRawAsync`)
-- **`GoogleOAuthClient`**——授權網址、code 換 token、續期、撤銷、讀 `id_token` 的 claim
+- **`GmailClient`**——profile、列出 / 讀取信件(metadata、full,或 RFC 822 原始 bytes)、`history.list` 增量同步、回填用的 batch 取信、討論串、修改 / 批次修改標籤、垃圾桶進出、回報垃圾信、標籤 CRUD、附件、`messages.send`——內建 RFC 822 組信器(`GmailOutgoingMessage`)或自己給 bytes(`SendRawAsync`)
+- **`GoogleOAuthClient`**——授權網址、code 換 token、續期、撤銷、讀 `id_token` 的 claim;**`GoogleAccessTokenProvider`** 幫你把一個信箱的 access token 快取好、到期前續好
 - **`GmailApiException`**——所有非 2xx 回應,帶 Google 的錯誤 reason 與同步迴圈需要的四個旗標:`IsUnauthorized`、`IsHistoryExpired`、`IsRateLimited`、`IsNotFound`
 
 它**不是**什麼:不存、不加密 token;不做 Pub/Sub 推播;不永久刪除;不講 IMAP / SMTP;不包 Gmail 以外的 Google API;不做分類。這些都在你的應用程式裡。
