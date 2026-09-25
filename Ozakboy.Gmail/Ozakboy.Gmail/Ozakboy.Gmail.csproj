@@ -1,20 +1,16 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <!-- 語言版本、分析器、可重現建置與共用套件中繼資料集中在 repo 根目錄的 Directory.Build.props -->
   <PropertyGroup>
     <!-- 目標框架：語法以 netstandard2.0 可用為準 -->
     <TargetFrameworks>netstandard2.0;netstandard2.1;net8.0;net9.0;net10.0</TargetFrameworks>
-    <LangVersion>latest</LangVersion>
-    <Nullable>enable</Nullable>
 
     <!-- 套件基本資訊 -->
     <PackageId>Ozakboy.Gmail</PackageId>
     <AssemblyName>Ozakboy.Gmail</AssemblyName>
     <RootNamespace>Ozakboy.Gmail</RootNamespace>
     <Title>Ozakboy.Gmail — Thin async Gmail REST client + Google OAuth for .NET</Title>
-    <Authors>ozakboy</Authors>
-    <Company>ozakboy</Company>
     <Product>Ozakboy.Gmail</Product>
-    <Copyright>Copyright © ozakboy 2026</Copyright>
     <Description>A thin, async-only client for the Gmail REST API and the Google OAuth 2.0 token endpoints, with no dependency on Google.Apis. List, read and send messages (via messages.send, so the single gmail.modify scope is enough), incremental sync with history.list, labels, trash, attachments, plus authorization URL building, code exchange, token refresh and revocation. You supply an access-token provider; the library never stores tokens. Every non-2xx response becomes a GmailApiException with the Google error reason and flags for expired history, revoked authorization and rate limiting; 429 / 5xx are retried with exponential backoff. No third-party MIME library: outgoing mail is composed by a built-in RFC 822 writer (GmailOutgoingMessage) or supplied as raw RFC 822 bytes. Targets netstandard2.0, netstandard2.1, net8.0, net9.0 and net10.0.</Description>
     <PackageTags>gmail;gmail-api;google;oauth;oauth2;google-oauth;email;mail;rest;async;rfc822;mime;history;labels;dotnet;csharp;netstandard</PackageTags>
 
@@ -27,30 +23,10 @@
     <!-- 專案連結 -->
     <PackageProjectUrl>https://github.com/ozakboy/ozakboy.Gmail</PackageProjectUrl>
     <RepositoryUrl>https://github.com/ozakboy/ozakboy.Gmail</RepositoryUrl>
-    <RepositoryType>git</RepositoryType>
-
-    <!-- 授權與門面 -->
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageIcon>logo.png</PackageIcon>
 
     <!-- 建置產出 -->
     <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
     <GenerateDocumentationFile>True</GenerateDocumentationFile>
-    <IncludeSymbols>true</IncludeSymbols>
-    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
-
-    <!-- 可重現建置與原始碼連結 -->
-    <Deterministic>true</Deterministic>
-    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
-    <PublishRepositoryUrl>true</PublishRepositoryUrl>
-    <EmbedUntrackedSources>true</EmbedUntrackedSources>
-
-    <!-- 分析器與程式碼風格 -->
-    <Features>strict</Features>
-    <EnableNETAnalyzers>true</EnableNETAnalyzers>
-    <AnalysisLevel>latest</AnalysisLevel>
-    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
 
     <PackageReleaseNotes>
 v2.1.0 — faster backfill, thread endpoints, body / attachment helpers, a ready-made access-token provider, and finer retry control. No breaking changes.
@@ -81,23 +57,30 @@ Full changelog: https://github.com/ozakboy/ozakboy.Gmail/blob/main/docs/en/chang
     <None Include="..\..\logo.png" Pack="True" PackagePath="\" />
   </ItemGroup>
 
-  <!-- NuGet 相依套件 -->
+  <!--
+    NuGet 相依套件:只允許 .NET BCL 與 Microsoft 官方套件,判定看遞移相依。
+    Microsoft.Extensions.* 10.x 仍支援 netstandard2.0 / net462,所以五個目標框架不必分開處理。
+    Dependencies: BCL and first-party Microsoft packages only, judged by the transitive graph.
+    Microsoft.Extensions.* 10.x still targets netstandard2.0 / net462, so one version serves all five TFMs.
+  -->
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="8.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="8.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.12" />
   </ItemGroup>
 
   <!-- System.Text.Json 在 netstandard 不是內建，需套件；net8.0+ 走內建版本 -->
   <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0' Or '$(TargetFramework)' == 'netstandard2.1'">
-    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+    <PackageReference Include="System.Text.Json" Version="10.0.12" />
   </ItemGroup>
 
-  <ItemGroup>
-    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.300">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
-  </ItemGroup>
+  <!--
+    刻意不引用 Microsoft.SourceLink.GitHub 套件,與其他 Ozakboy.* 套件一致。
+    自 .NET 8 起 SourceLink 已內建於 SDK,設定 PublishRepositoryUrl 與 EmbedUntrackedSources
+    (見 Directory.Build.props)即可;外掛套件反而會遞移帶進有安全通報的 Microsoft.Build.Tasks.Git
+    (GHSA-23fw-v26w-5fgq),在 TreatWarningsAsErrors 之下讓「還原」階段就直接失敗。
+    Microsoft.SourceLink.GitHub is deliberately not referenced: SourceLink ships in the SDK since .NET 8, and the
+    plugin transitively pulls in Microsoft.Build.Tasks.Git, which carries a published advisory.
+  -->
 
   <!-- 測試專案需存取 Ozakboy.Gmail.Core 的內部型別 -->
   <ItemGroup>

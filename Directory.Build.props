@@ -1,0 +1,94 @@
+<Project>
+
+  <!--
+    套件 repo 統一建置設定(比照 Ozakboy.* 家族的 Directory.Build.props)。
+    分析器層級、可重現建置、SourceLink 與共用的套件中繼資料集中於此;
+    各 csproj 只放自己專屬的目標框架、PackageId、版號與描述。
+    Shared build settings for the repository, aligned with the other Ozakboy.* packages. Analyzer level,
+    reproducible-build flags, SourceLink and common package metadata live here; each csproj keeps only its
+    own target frameworks, PackageId, version and description.
+  -->
+
+  <!--
+    先推導 IsTestProject。
+    這個屬性平常由測試 SDK 設定,但 Directory.Build.props 的匯入時機早於測試 SDK,
+    在這裡直接拿它當條件會永遠求值為空,底下的測試專案設定就完全不會生效。
+    因此以專案名稱慣例(*.Tests)自行推導一次;若呼叫端已明確指定則尊重原值。
+    比對區分大小寫:手動測試用的 console(Ozakboy.Gmail.TEST)不是測試專案,走主函式庫那套嚴格設定。
+  -->
+  <PropertyGroup>
+    <IsTestProject Condition="'$(IsTestProject)' == '' AND $(MSBuildProjectName.EndsWith('.Tests'))">true</IsTestProject>
+  </PropertyGroup>
+
+  <!--
+    語言設定。目標框架刻意不放這裡:主函式庫是 netstandard2.0 起的多目標(消費端可能還在 netstandard),
+    測試專案是 net10.0 + net48,各 csproj 自己宣告。
+    Language settings only. Target frameworks are deliberately left to each csproj: the library multi-targets
+    from netstandard2.0 up, the test project targets net10.0 and net48.
+  -->
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <!--
+    靜態分析:主函式庫警告視為錯誤。AnalysisLevel 維持本 repo 原本的 latest(家族其他套件是 latest-all,
+    但這裡是多目標函式庫,升到 latest-all 會冒出一批新規則,要另外評估,不在建置期調整時順手改)。
+    Static analysis: warnings are errors for the library. AnalysisLevel stays at this repo's existing
+    "latest" (sibling packages use latest-all; raising it here would surface new rules across five TFMs and
+    deserves its own change).
+  -->
+  <PropertyGroup Condition="'$(IsTestProject)' != 'true'">
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <Features>strict</Features>
+  </PropertyGroup>
+
+  <!-- 測試專案:保留分析器但不因警告中斷,避免測試樣板碼被規則卡住 -->
+  <PropertyGroup Condition="'$(IsTestProject)' == 'true'">
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <IsPackable>false</IsPackable>
+    <!--
+      CA1707:測試方法慣用 Method_Scenario_Expected 的底線命名,可讀性優於 PascalCase 長字串。
+      MSTEST0037:建議改用 Assert.IsLessThanOrEqualTo 這類專用 API;但那些多載無法附帶自訂失敗訊息,
+                  而測試失敗時的訊息比斷言方法的名稱更有價值,故不強制。
+      CA1861:測試裡的字面陣列(new[] { "INBOX", "UNREAD" })就是測試資料,寫在斷言旁邊才看得出意圖;
+              抽成 static readonly 欄位只會讓讀者來回翻找,而且這條規則在測試專案裡一出現就是幾十筆,會淹沒真正的警告。
+    -->
+    <NoWarn>$(NoWarn);CA1707;MSTEST0037;CA1861</NoWarn>
+  </PropertyGroup>
+
+  <!-- 套件中繼資料(共用部分) -->
+  <PropertyGroup>
+    <Authors>ozakboy</Authors>
+    <Company>ozakboy</Company>
+    <Copyright>Copyright © ozakboy 2026</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <!-- ozakboy 套件家族共用的品牌圖示,顯示於 nuget.org 與 IDE 的套件管理員 -->
+    <PackageIcon>logo.png</PackageIcon>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+
+  <!--
+    可重現建置與符號檔。SourceLink 自 .NET 8 起內建於 SDK,設定 PublishRepositoryUrl 與 EmbedUntrackedSources
+    即可,不引用 Microsoft.SourceLink.GitHub 外掛套件(它遞移帶進的 Microsoft.Build.Tasks.Git 有安全通報,
+    在 TreatWarningsAsErrors 之下會讓還原階段直接失敗)。
+    Reproducible builds and symbols. SourceLink is built into the SDK since .NET 8, so PublishRepositoryUrl and
+    EmbedUntrackedSources are enough; the Microsoft.SourceLink.GitHub plugin is deliberately not referenced.
+  -->
+  <PropertyGroup>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+
+</Project>
