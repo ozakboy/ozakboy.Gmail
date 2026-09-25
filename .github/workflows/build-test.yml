@@ -1,7 +1,17 @@
 name: Build and test
 
 # 五個 TFM 建置 + net10.0 / net48 測試。net48 需要 Windows runner(.NET Framework 4.8 內建於 windows-latest)。
-# Builds all five TFMs and runs the tests on net10.0 and net48. net48 needs a Windows runner (4.8 ships with windows-latest).
+# 測試專案走 Microsoft.Testing.Platform(MTP)而非舊的 VSTest(見 Ozakboy.Gmail.Tests.csproj 與 repo 根目錄的
+# global.json:VSTest 那條路徑會遞移帶進第三方的 Newtonsoft.Json,違反本專案的相依政策)。
+# MTP 不認得 VSTest 的 --logger,產生 trx 的等效寫法是 --report-trx;.NET 10 的 dotnet test 指定方案要用 --solution。
+# 主函式庫的「警告視為錯誤」由 Directory.Build.props 設定,不再靠命令列的 -p:TreatWarningsAsErrors
+# (那會連測試專案一起套用,而測試專案刻意只保留分析器、不因警告中斷)。
+# Builds all five TFMs and runs the tests on net10.0 and net48. net48 needs a Windows runner (4.8 ships with
+# windows-latest). The test project runs on Microsoft.Testing.Platform rather than VSTest (see the test csproj and
+# the repo-level global.json: the VSTest path transitively pulls in the third-party Newtonsoft.Json). MTP does not
+# understand VSTest's --logger; the trx equivalent is --report-trx, and .NET 10's dotnet test takes --solution.
+# Warnings-as-errors for the library now comes from Directory.Build.props instead of a command-line override,
+# which would also have applied to the test project (analyzers on, but warnings there are deliberately non-fatal).
 
 on:
   push:
@@ -23,6 +33,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # SourceLink 需要完整歷史 / SourceLink needs the full history
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -32,11 +44,11 @@ jobs:
       - name: Restore
         run: dotnet restore Ozakboy.Gmail/Ozakboy.Gmail.sln
 
-      - name: Build (Release, warnings as errors for the library)
-        run: dotnet build Ozakboy.Gmail/Ozakboy.Gmail.sln -c Release --no-restore -p:TreatWarningsAsErrors=true
+      - name: Build (Release, all TFMs; warnings are errors for the library via Directory.Build.props)
+        run: dotnet build Ozakboy.Gmail/Ozakboy.Gmail.sln -c Release --no-restore
 
-      - name: Test (net10.0 + net48)
-        run: dotnet test Ozakboy.Gmail/Ozakboy.Gmail.sln -c Release --no-build --logger "trx;LogFileName=results.trx"
+      - name: Test (net10.0 + net48, Microsoft.Testing.Platform)
+        run: dotnet test --solution Ozakboy.Gmail/Ozakboy.Gmail.sln -c Release --no-build --report-trx
 
       - name: Upload test results
         if: always()
