@@ -10,6 +10,19 @@ Version numbers follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Unreleased]
+
+> Build-time changes only. The package's public API, behaviour and target frameworks are unchanged; consumers are not affected.
+
+### Technical
+
+- **Dependencies** — `Microsoft.Extensions.Configuration.Abstractions` 8.0.0 → 10.0.12 and `Microsoft.Extensions.Configuration.Binder` 8.0.2 → 10.0.12; `System.Text.Json` 8.0.5 → 10.0.12 on the `netstandard2.0` / `netstandard2.1` targets (`net8.0`+ keep using the framework's own copy). All three still ship `netstandard2.0` / `net462` builds, so the five-TFM list stays as it is. The manual-test console picks up the same versions.
+- **SourceLink** — the `Microsoft.SourceLink.GitHub` package is gone. SourceLink has been built into the SDK since .NET 8 (`PublishRepositoryUrl` + `EmbedUntrackedSources`), and the plugin transitively pulled in `Microsoft.Build.Tasks.Git`, which carries a published advisory (GHSA-23fw-v26w-5fgq) and showed up as `NU1902` on every restore.
+- **Test project** — migrated from xUnit 2.9 + `Microsoft.NET.Test.Sdk` (VSTest) to MSTest 4.4 on Microsoft.Testing.Platform. `Microsoft.NET.Test.Sdk` transitively brought in the third-party `Newtonsoft.Json`; the solution's dependency graph now contains none. Same 267 test methods (309 cases with data rows), still run on `net10.0` and `net48`, still entirely offline. xUnit's sequence-comparing `Assert.Equal` became `CollectionAssert.AreEqual` at the nine places that compared arrays; everything else maps one to one.
+- **Build infrastructure** — shared settings (language version, analyzers, warnings-as-errors for the library, reproducible-build and SourceLink flags, common package metadata) moved from the csproj files into a repo-level `Directory.Build.props`, matching the other Ozakboy.* packages; a `global.json` selects the Microsoft.Testing.Platform runner for `dotnet test`. The GitHub Actions workflow now runs `dotnet test --solution … --report-trx` and no longer forces `TreatWarningsAsErrors` from the command line (the test project keeps its analyzers on but non-fatal).
+
+---
+
 ## [2.1.0] - 2026-09-04
 
 > Faster backfill, thread endpoints, body / attachment helpers, a ready-made access-token provider and finer retry control. **No breaking changes.**

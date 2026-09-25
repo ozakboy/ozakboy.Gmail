@@ -10,6 +10,19 @@ description: Ozakboy.Gmail 所有重要變更。
 
 ---
 
+## [Unreleased]
+
+> 只有建置期的異動。套件的公開 API、行為與目標框架都沒變,消費者不受影響。
+
+### 技術改進
+
+- **相依套件**——`Microsoft.Extensions.Configuration.Abstractions` 8.0.0 → 10.0.12、`Microsoft.Extensions.Configuration.Binder` 8.0.2 → 10.0.12;`netstandard2.0` / `netstandard2.1` 目標的 `System.Text.Json` 8.0.5 → 10.0.12(`net8.0` 以上仍用框架內建版本)。三者都還有 `netstandard2.0` / `net462` 組建,五個 TFM 的清單維持不變。手動測試 console 一併升到同版本。
+- **SourceLink**——拿掉 `Microsoft.SourceLink.GitHub` 套件。SourceLink 自 .NET 8 起已內建於 SDK(`PublishRepositoryUrl` + `EmbedUntrackedSources`),而這個外掛遞移帶進的 `Microsoft.Build.Tasks.Git` 有安全通報(GHSA-23fw-v26w-5fgq),每次還原都冒 `NU1902`。
+- **測試專案**——從 xUnit 2.9 + `Microsoft.NET.Test.Sdk`(VSTest)改為 MSTest 4.4 搭配 Microsoft.Testing.Platform。`Microsoft.NET.Test.Sdk` 會遞移帶進第三方的 `Newtonsoft.Json`;現在整個方案的相依圖裡沒有它。測試方法同樣 267 個(含資料列共 309 個案例),仍在 `net10.0` 與 `net48` 上跑、仍全程離線。xUnit 會逐項比對序列的 `Assert.Equal` 在九處比對陣列的地方改成 `CollectionAssert.AreEqual`,其餘一對一對應。
+- **建置基礎設施**——共用設定(語言版本、分析器、主函式庫的警告視為錯誤、可重現建置與 SourceLink 旗標、共用套件中繼資料)從各 csproj 移到 repo 根目錄的 `Directory.Build.props`,與其他 Ozakboy.* 套件一致;`global.json` 指定 `dotnet test` 走 Microsoft.Testing.Platform。GitHub Actions workflow 改為 `dotnet test --solution … --report-trx`,不再從命令列強制 `TreatWarningsAsErrors`(測試專案保留分析器但警告不中斷)。
+
+---
+
 ## [2.1.0] - 2026-09-04
 
 > 回填更快、討論串端點、內文 / 附件 helper、現成的 access token 提供者、更細的重試控制。**沒有破壞性變更。**
