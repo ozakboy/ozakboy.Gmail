@@ -6,7 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Ozakboy.Gmail.OAuth;
 using Ozakboy.Gmail.Tests.TestSupport;
-using Xunit;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Ozakboy.Gmail.Tests
 {
@@ -14,13 +14,14 @@ namespace Ozakboy.Gmail.Tests
     /// GoogleAccessTokenProvider 的測試:快取、提前續期、並發收斂、回呼與失敗處理。
     /// 權杖端點一律由 RecordingHandler 假造,不會連到 Google。
     /// </summary>
+    [TestClass]
     public class GoogleAccessTokenProviderTests
     {
         private const string ClientId = "client-id.apps.googleusercontent.com";
         private const string ClientSecret = "client-secret";
         private const string RefreshToken = "refresh-token";
 
-        [Fact]
+        [TestMethod]
         public async Task GetAccessTokenAsync_沒有快取_會呼叫權杖端點續期()
         {
             var handler = new RecordingHandler();
@@ -29,14 +30,14 @@ namespace Ozakboy.Gmail.Tests
 
             var token = await provider.GetAccessTokenAsync();
 
-            Assert.Equal("at-1", token);
-            Assert.Equal(1, handler.RequestCount);
-            Assert.Equal("https://oauth2.googleapis.com/token", handler.LastRequest.Url);
-            Assert.Equal("at-1", provider.CurrentAccessToken);
-            Assert.NotNull(provider.ExpiresAt);
+            Assert.AreEqual("at-1", token);
+            Assert.AreEqual(1, handler.RequestCount);
+            Assert.AreEqual("https://oauth2.googleapis.com/token", handler.LastRequest.Url);
+            Assert.AreEqual("at-1", provider.CurrentAccessToken);
+            Assert.IsNotNull(provider.ExpiresAt);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task GetAccessTokenAsync_第二次呼叫_直接用快取不再打權杖端點()
         {
             var handler = new RecordingHandler();
@@ -46,11 +47,11 @@ namespace Ozakboy.Gmail.Tests
             await provider.GetAccessTokenAsync();
             var second = await provider.GetAccessTokenAsync();
 
-            Assert.Equal("at-1", second);
-            Assert.Equal(1, handler.RequestCount);
+            Assert.AreEqual("at-1", second);
+            Assert.AreEqual(1, handler.RequestCount);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task GetAccessTokenAsync_快取已進入緩衝區間_提前續期()
         {
             var handler = new RecordingHandler();
@@ -66,11 +67,11 @@ namespace Ozakboy.Gmail.Tests
 
             var token = await provider.GetAccessTokenAsync();
 
-            Assert.Equal("at-new", token);
-            Assert.Equal(1, handler.RequestCount);
+            Assert.AreEqual("at-new", token);
+            Assert.AreEqual(1, handler.RequestCount);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task GetAccessTokenAsync_初始權杖尚未到期_完全不送請求()
         {
             var handler = new RecordingHandler();
@@ -82,11 +83,11 @@ namespace Ozakboy.Gmail.Tests
 
             var token = await provider.GetAccessTokenAsync();
 
-            Assert.Equal("at-initial", token);
-            Assert.Equal(0, handler.RequestCount);
+            Assert.AreEqual("at-initial", token);
+            Assert.AreEqual(0, handler.RequestCount);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task GetAccessTokenAsync_只給初始權杖沒給到期時間_視同沒有快取()
         {
             var handler = new RecordingHandler();
@@ -96,12 +97,12 @@ namespace Ozakboy.Gmail.Tests
                 InitialAccessToken = "at-initial",
             });
 
-            Assert.Null(provider.CurrentAccessToken);
-            Assert.Equal("at-1", await provider.GetAccessTokenAsync());
-            Assert.Equal(1, handler.RequestCount);
+            Assert.IsNull(provider.CurrentAccessToken);
+            Assert.AreEqual("at-1", await provider.GetAccessTokenAsync());
+            Assert.AreEqual(1, handler.RequestCount);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task GetAccessTokenAsync_只給到期時間沒給權杖_視同沒有快取()
         {
             var handler = new RecordingHandler();
@@ -111,12 +112,12 @@ namespace Ozakboy.Gmail.Tests
                 InitialExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
             });
 
-            Assert.Null(provider.ExpiresAt);
-            Assert.Equal("at-1", await provider.GetAccessTokenAsync());
-            Assert.Equal(1, handler.RequestCount);
+            Assert.IsNull(provider.ExpiresAt);
+            Assert.AreEqual("at-1", await provider.GetAccessTokenAsync());
+            Assert.AreEqual(1, handler.RequestCount);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task GetAccessTokenAsync_二十個並發呼叫_只續期一次()
         {
             var handler = new RecordingHandler();
@@ -129,11 +130,14 @@ namespace Ozakboy.Gmail.Tests
 
             var tokens = await Task.WhenAll(tasks);
 
-            Assert.Equal(1, handler.RequestCount);
-            Assert.All(tokens, token => Assert.Equal("at-1", token));
+            Assert.AreEqual(1, handler.RequestCount);
+            foreach (var token in tokens)
+            {
+                Assert.AreEqual("at-1", token);
+            }
         }
 
-        [Fact]
+        [TestMethod]
         public async Task GetAccessTokenAsync_續期成功_OnRefreshed收到權杖回應()
         {
             var handler = new RecordingHandler();
@@ -151,12 +155,12 @@ namespace Ozakboy.Gmail.Tests
 
             await provider.GetAccessTokenAsync();
 
-            Assert.NotNull(received);
-            Assert.Equal("at-1", received.AccessToken);
-            Assert.Equal(1800, received.ExpiresIn);
+            Assert.IsNotNull(received);
+            Assert.AreEqual("at-1", received.AccessToken);
+            Assert.AreEqual(1800, received.ExpiresIn);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task Invalidate_清掉快取後強制續期()
         {
             var handler = new RecordingHandler { RepeatLastResponse = false };
@@ -164,16 +168,16 @@ namespace Ozakboy.Gmail.Tests
             handler.EnqueueJson(TokenJson("at-2", 3600));
             var provider = CreateProvider(handler);
 
-            Assert.Equal("at-1", await provider.GetAccessTokenAsync());
+            Assert.AreEqual("at-1", await provider.GetAccessTokenAsync());
 
             provider.Invalidate();
-            Assert.Null(provider.CurrentAccessToken);
+            Assert.IsNull(provider.CurrentAccessToken);
 
-            Assert.Equal("at-2", await provider.GetAccessTokenAsync());
-            Assert.Equal(2, handler.RequestCount);
+            Assert.AreEqual("at-2", await provider.GetAccessTokenAsync());
+            Assert.AreEqual(2, handler.RequestCount);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task GetAccessTokenAsync_續期失敗_原樣拋出且快取不變()
         {
             var handler = new RecordingHandler();
@@ -188,26 +192,26 @@ namespace Ozakboy.Gmail.Tests
                 InitialExpiresAt = expired,
             });
 
-            var exception = await Assert.ThrowsAsync<GmailApiException>(() => provider.GetAccessTokenAsync());
+            var exception = await Assert.ThrowsExactlyAsync<GmailApiException>(() => provider.GetAccessTokenAsync());
 
-            Assert.True(exception.IsUnauthorized);
-            Assert.Equal("invalid_grant", exception.Reason);
-            Assert.Equal("at-old", provider.CurrentAccessToken);
-            Assert.Equal(expired, provider.ExpiresAt);
+            Assert.IsTrue(exception.IsUnauthorized);
+            Assert.AreEqual("invalid_grant", exception.Reason);
+            Assert.AreEqual("at-old", provider.CurrentAccessToken);
+            Assert.AreEqual(expired, provider.ExpiresAt);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task GetAccessTokenAsync_回應沒有access_token_拋出InvalidOperationException()
         {
             var handler = new RecordingHandler();
             handler.EnqueueJson("{\"expires_in\":3600,\"token_type\":\"Bearer\"}");
             var provider = CreateProvider(handler);
 
-            await Assert.ThrowsAsync<InvalidOperationException>(() => provider.GetAccessTokenAsync());
-            Assert.Null(provider.CurrentAccessToken);
+            await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => provider.GetAccessTokenAsync());
+            Assert.IsNull(provider.CurrentAccessToken);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task GetAccessTokenAsync_取消權杖已取消_不會送出請求()
         {
             var handler = new RecordingHandler();
@@ -217,37 +221,37 @@ namespace Ozakboy.Gmail.Tests
             using var cancellation = new CancellationTokenSource();
             cancellation.Cancel();
 
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => provider.GetAccessTokenAsync(cancellation.Token));
-            Assert.Equal(0, handler.RequestCount);
+            await Assert.ThrowsAsync<OperationCanceledException>(() => provider.GetAccessTokenAsync(cancellation.Token));
+            Assert.AreEqual(0, handler.RequestCount);
         }
 
-        [Fact]
+        [TestMethod]
         public void 建構子_OAuth用戶端為null_拋出ArgumentNullException()
         {
-            Assert.Throws<ArgumentNullException>(() => new GoogleAccessTokenProvider(null, RefreshToken));
+            Assert.ThrowsExactly<ArgumentNullException>(() => new GoogleAccessTokenProvider(null, RefreshToken));
         }
 
-        [Theory]
-        [InlineData(null)]
-        [InlineData("")]
-        [InlineData("   ")]
+        [TestMethod]
+        [DataRow(null)]
+        [DataRow("")]
+        [DataRow("   ")]
         public void 建構子_更新權杖為空_拋出ArgumentException(string refreshToken)
         {
             var client = CreateOAuthClient(new RecordingHandler());
 
-            Assert.Throws<ArgumentException>(() => new GoogleAccessTokenProvider(client, refreshToken));
+            Assert.ThrowsExactly<ArgumentException>(() => new GoogleAccessTokenProvider(client, refreshToken));
         }
 
-        [Fact]
+        [TestMethod]
         public void 建構子_RefreshSkew為負值_拋出ArgumentOutOfRangeException()
         {
             var client = CreateOAuthClient(new RecordingHandler());
             var options = new GoogleAccessTokenProviderOptions { RefreshSkew = TimeSpan.FromSeconds(-1) };
 
-            Assert.Throws<ArgumentOutOfRangeException>(() => new GoogleAccessTokenProvider(client, RefreshToken, options));
+            Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new GoogleAccessTokenProvider(client, RefreshToken, options));
         }
 
-        [Fact]
+        [TestMethod]
         public async Task GetAccessTokenAsync_可直接當成GmailClient的權杖提供者()
         {
             var tokenHandler = new RecordingHandler();
@@ -260,7 +264,7 @@ namespace Ozakboy.Gmail.Tests
 
             await client.GetProfileAsync();
 
-            Assert.Equal("Bearer at-1", gmailHandler.LastRequest.Authorization);
+            Assert.AreEqual("Bearer at-1", gmailHandler.LastRequest.Authorization);
         }
 
         /// <summary>用假 handler 建立 provider。</summary>

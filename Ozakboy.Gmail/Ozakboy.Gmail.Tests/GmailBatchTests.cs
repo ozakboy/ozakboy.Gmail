@@ -6,7 +6,7 @@ using System.Text;
 using System.Threading.Tasks;
 using Ozakboy.Gmail.Core;
 using Ozakboy.Gmail.Tests.TestSupport;
-using Xunit;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Ozakboy.Gmail.Tests
 {
@@ -14,6 +14,7 @@ namespace Ozakboy.Gmail.Tests
     /// 批次取信的測試:外層請求組裝、子請求格式、multipart 回應解析與逐筆失敗分類。
     /// 回應樣本刻意寫成 Gmail 真實回傳的形狀(application/http 部件包一整段 HTTP 回應)。
     /// </summary>
+    [TestClass]
     public class GmailBatchTests
     {
         private const string BatchUrl = "https://gmail.googleapis.com/batch/gmail/v1";
@@ -25,7 +26,7 @@ namespace Ozakboy.Gmail.Tests
         private const string RateLimitJson =
             "{\"error\":{\"code\":429,\"message\":\"Too many requests\",\"errors\":[{\"reason\":\"rateLimitExceeded\"}]}}";
 
-        [Fact]
+        [TestMethod]
         public async Task BatchGetMessagesAsync_送出POST到批次端點且為multipart()
         {
             var handler = new RecordingHandler();
@@ -34,13 +35,13 @@ namespace Ozakboy.Gmail.Tests
 
             await client.BatchGetMessagesAsync(new[] { "m1", "m2" });
 
-            Assert.Equal(1, handler.RequestCount);
-            Assert.Equal("POST", handler.LastRequest.Method);
-            Assert.Equal(BatchUrl, handler.LastRequest.Url);
+            Assert.AreEqual(1, handler.RequestCount);
+            Assert.AreEqual("POST", handler.LastRequest.Method);
+            Assert.AreEqual(BatchUrl, handler.LastRequest.Url);
             Assert.StartsWith("multipart/mixed", handler.LastRequest.ContentType, StringComparison.Ordinal);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task BatchGetMessagesAsync_每個子請求都有GET路徑與ContentID()
         {
             var handler = new RecordingHandler();
@@ -57,7 +58,7 @@ namespace Ozakboy.Gmail.Tests
             Assert.Contains("GET /gmail/v1/users/me/messages/m2?format=full HTTP/1.1", body, StringComparison.Ordinal);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task BatchGetMessagesAsync_Metadata格式_子請求帶重複的metadataHeaders()
         {
             var handler = new RecordingHandler();
@@ -72,7 +73,7 @@ namespace Ozakboy.Gmail.Tests
                 StringComparison.Ordinal);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task BatchGetMessagesAsync_非Metadata格式_不送metadataHeaders()
         {
             var handler = new RecordingHandler();
@@ -84,7 +85,7 @@ namespace Ozakboy.Gmail.Tests
             Assert.DoesNotContain("metadataHeaders", handler.LastRequest.Body, StringComparison.Ordinal);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task BatchGetMessagesAsync_識別碼會做URL轉義()
         {
             var handler = new RecordingHandler();
@@ -96,7 +97,7 @@ namespace Ozakboy.Gmail.Tests
             Assert.Contains("/messages/a%2Fb?format=full", handler.LastRequest.Body, StringComparison.Ordinal);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task BatchGetMessagesAsync_授權標頭只掛在外層請求()
         {
             var handler = new RecordingHandler();
@@ -105,11 +106,11 @@ namespace Ozakboy.Gmail.Tests
 
             await client.BatchGetMessagesAsync(new[] { "m1", "m2" });
 
-            Assert.Equal("Bearer " + GmailTestFactory.AccessToken, handler.LastRequest.Authorization);
+            Assert.AreEqual("Bearer " + GmailTestFactory.AccessToken, handler.LastRequest.Authorization);
             Assert.DoesNotContain("Authorization", handler.LastRequest.Body, StringComparison.OrdinalIgnoreCase);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task BatchGetMessagesAsync_全部成功_解析出每一封郵件()
         {
             var handler = new RecordingHandler();
@@ -118,14 +119,14 @@ namespace Ozakboy.Gmail.Tests
 
             var result = await client.BatchGetMessagesAsync(new[] { "m1", "m2", "m3" });
 
-            Assert.Empty(result.Failures);
-            Assert.Equal(3, result.Messages.Count);
-            Assert.Equal("m1", result.Messages[0].Id);
-            Assert.Equal("m3", result.Messages[2].Id);
-            Assert.Equal("t0", result.Messages[0].ThreadId);
+            Assert.IsEmpty(result.Failures);
+            Assert.AreEqual(3, result.Messages.Count);
+            Assert.AreEqual("m1", result.Messages[0].Id);
+            Assert.AreEqual("m3", result.Messages[2].Id);
+            Assert.AreEqual("t0", result.Messages[0].ThreadId);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task BatchGetMessagesAsync_其中一筆404_進失敗清單且對回正確識別碼()
         {
             var handler = new RecordingHandler();
@@ -139,19 +140,19 @@ namespace Ozakboy.Gmail.Tests
 
             var result = await client.BatchGetMessagesAsync(new[] { "m1", "m2", "m3" });
 
-            Assert.Equal(2, result.Messages.Count);
-            Assert.Single(result.Failures);
+            Assert.AreEqual(2, result.Messages.Count);
+            Assert.ContainsSingle(result.Failures);
 
             var failure = result.Failures[0];
-            Assert.Equal("m2", failure.Id);
-            Assert.Equal(404, failure.StatusCode);
-            Assert.Equal("notFound", failure.Reason);
-            Assert.Equal("Requested entity was not found.", failure.ErrorMessage);
-            Assert.True(failure.IsNotFound);
-            Assert.False(failure.IsRateLimited);
+            Assert.AreEqual("m2", failure.Id);
+            Assert.AreEqual(404, failure.StatusCode);
+            Assert.AreEqual("notFound", failure.Reason);
+            Assert.AreEqual("Requested entity was not found.", failure.ErrorMessage);
+            Assert.IsTrue(failure.IsNotFound);
+            Assert.IsFalse(failure.IsRateLimited);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task BatchGetMessagesAsync_子部件429_標記為限流且不重試()
         {
             var handler = new RecordingHandler();
@@ -163,14 +164,14 @@ namespace Ozakboy.Gmail.Tests
 
             var result = await client.BatchGetMessagesAsync(new[] { "m1" });
 
-            Assert.Equal(1, handler.RequestCount);
-            Assert.Empty(result.Messages);
-            Assert.Single(result.Failures);
-            Assert.True(result.Failures[0].IsRateLimited);
-            Assert.False(result.Failures[0].IsNotFound);
+            Assert.AreEqual(1, handler.RequestCount);
+            Assert.IsEmpty(result.Messages);
+            Assert.ContainsSingle(result.Failures);
+            Assert.IsTrue(result.Failures[0].IsRateLimited);
+            Assert.IsFalse(result.Failures[0].IsNotFound);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task BatchGetMessagesAsync_一百二十筆_預設分成三個HTTP請求()
         {
             var handler = new RecordingHandler { RepeatLastResponse = false };
@@ -182,12 +183,12 @@ namespace Ozakboy.Gmail.Tests
 
             var result = await client.BatchGetMessagesAsync(ids);
 
-            Assert.Equal(3, handler.RequestCount);
-            Assert.Equal(120, result.Messages.Count);
-            Assert.Empty(result.Failures);
+            Assert.AreEqual(3, handler.RequestCount);
+            Assert.AreEqual(120, result.Messages.Count);
+            Assert.IsEmpty(result.Failures);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task BatchGetMessagesAsync_BatchSize為一百_一百二十筆分成兩個HTTP請求()
         {
             var handler = new RecordingHandler { RepeatLastResponse = false };
@@ -201,11 +202,11 @@ namespace Ozakboy.Gmail.Tests
 
             var result = await client.BatchGetMessagesAsync(ids);
 
-            Assert.Equal(2, handler.RequestCount);
-            Assert.Equal(120, result.Messages.Count);
+            Assert.AreEqual(2, handler.RequestCount);
+            Assert.AreEqual(120, result.Messages.Count);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task BatchGetMessagesAsync_空序列_不送請求且回傳空結果()
         {
             var handler = new RecordingHandler();
@@ -213,35 +214,35 @@ namespace Ozakboy.Gmail.Tests
 
             var result = await client.BatchGetMessagesAsync(Array.Empty<string>());
 
-            Assert.Equal(0, handler.RequestCount);
-            Assert.Empty(result.Messages);
-            Assert.Empty(result.Failures);
+            Assert.AreEqual(0, handler.RequestCount);
+            Assert.IsEmpty(result.Messages);
+            Assert.IsEmpty(result.Failures);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task BatchGetMessagesAsync_識別碼清單為null_拋出ArgumentNullException()
         {
             var handler = new RecordingHandler();
             var client = GmailTestFactory.CreateClient(handler);
 
-            await Assert.ThrowsAsync<ArgumentNullException>(() => client.BatchGetMessagesAsync(null));
-            Assert.Equal(0, handler.RequestCount);
+            await Assert.ThrowsExactlyAsync<ArgumentNullException>(() => client.BatchGetMessagesAsync(null));
+            Assert.AreEqual(0, handler.RequestCount);
         }
 
-        [Theory]
-        [InlineData(null)]
-        [InlineData("")]
-        [InlineData("   ")]
+        [TestMethod]
+        [DataRow(null)]
+        [DataRow("")]
+        [DataRow("   ")]
         public async Task BatchGetMessagesAsync_含空白識別碼_拋出ArgumentException(string bad)
         {
             var handler = new RecordingHandler();
             var client = GmailTestFactory.CreateClient(handler);
 
-            await Assert.ThrowsAsync<ArgumentException>(() => client.BatchGetMessagesAsync(new[] { "m1", bad }));
-            Assert.Equal(0, handler.RequestCount);
+            await Assert.ThrowsExactlyAsync<ArgumentException>(() => client.BatchGetMessagesAsync(new[] { "m1", bad }));
+            Assert.AreEqual(0, handler.RequestCount);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task BatchGetMessagesAsync_部件數與識別碼數不符_拋出批次解析例外()
         {
             var handler = new RecordingHandler();
@@ -251,29 +252,29 @@ namespace Ozakboy.Gmail.Tests
             handler.EnqueueMultipart(body.ToString(), Boundary);
             var client = GmailTestFactory.CreateClient(handler);
 
-            var exception = await Assert.ThrowsAsync<GmailApiException>(
+            var exception = await Assert.ThrowsExactlyAsync<GmailApiException>(
                 () => client.BatchGetMessagesAsync(new[] { "m1", "m2" }));
 
-            Assert.Equal("batchParseError", exception.Reason);
-            Assert.Equal(200, exception.StatusCode);
-            Assert.Equal("/batch/gmail/v1", exception.RequestPath);
-            Assert.NotNull(exception.ResponseBody);
+            Assert.AreEqual("batchParseError", exception.Reason);
+            Assert.AreEqual(200, exception.StatusCode);
+            Assert.AreEqual("/batch/gmail/v1", exception.RequestPath);
+            Assert.IsNotNull(exception.ResponseBody);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task BatchGetMessagesAsync_回應沒有boundary_拋出批次解析例外()
         {
             var handler = new RecordingHandler();
             handler.EnqueueJson("{\"not\":\"multipart\"}");
             var client = GmailTestFactory.CreateClient(handler);
 
-            var exception = await Assert.ThrowsAsync<GmailApiException>(
+            var exception = await Assert.ThrowsExactlyAsync<GmailApiException>(
                 () => client.BatchGetMessagesAsync(new[] { "m1" }));
 
-            Assert.Equal("batchParseError", exception.Reason);
+            Assert.AreEqual("batchParseError", exception.Reason);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task BatchGetMessagesAsync_外層401_拋出未授權例外()
         {
             var handler = new RecordingHandler();
@@ -282,28 +283,28 @@ namespace Ozakboy.Gmail.Tests
                 "{\"error\":{\"code\":401,\"message\":\"Invalid Credentials\",\"errors\":[{\"reason\":\"authError\"}]}}");
             var client = GmailTestFactory.CreateClient(handler);
 
-            var exception = await Assert.ThrowsAsync<GmailApiException>(
+            var exception = await Assert.ThrowsExactlyAsync<GmailApiException>(
                 () => client.BatchGetMessagesAsync(new[] { "m1" }));
 
-            Assert.Equal(1, handler.RequestCount);
-            Assert.True(exception.IsUnauthorized);
+            Assert.AreEqual(1, handler.RequestCount);
+            Assert.IsTrue(exception.IsUnauthorized);
         }
 
-        [Fact]
+        [TestMethod]
         public void BatchResponseParser_取出帶引號與不帶引號的boundary()
         {
-            Assert.True(BatchResponseParser.TryGetBoundary("multipart/mixed; boundary=batch_1", out var plain));
-            Assert.Equal("batch_1", plain);
+            Assert.IsTrue(BatchResponseParser.TryGetBoundary("multipart/mixed; boundary=batch_1", out var plain));
+            Assert.AreEqual("batch_1", plain);
 
-            Assert.True(BatchResponseParser.TryGetBoundary("multipart/mixed; boundary=\"batch_2\"; charset=utf-8", out var quoted));
-            Assert.Equal("batch_2", quoted);
+            Assert.IsTrue(BatchResponseParser.TryGetBoundary("multipart/mixed; boundary=\"batch_2\"; charset=utf-8", out var quoted));
+            Assert.AreEqual("batch_2", quoted);
 
-            Assert.False(BatchResponseParser.TryGetBoundary("application/json", out var missing));
-            Assert.Equal(string.Empty, missing);
-            Assert.False(BatchResponseParser.TryGetBoundary(null, out _));
+            Assert.IsFalse(BatchResponseParser.TryGetBoundary("application/json", out var missing));
+            Assert.AreEqual(string.Empty, missing);
+            Assert.IsFalse(BatchResponseParser.TryGetBoundary(null, out _));
         }
 
-        [Fact]
+        [TestMethod]
         public void BatchResponseParser_解析出狀態碼ContentID與主體()
         {
             var body = new StringBuilder();
@@ -313,15 +314,15 @@ namespace Ozakboy.Gmail.Tests
 
             var parts = BatchResponseParser.Parse(body.ToString(), Boundary);
 
-            Assert.Equal(2, parts.Count);
-            Assert.Equal(200, parts[0].StatusCode);
-            Assert.Equal("response-item0", parts[0].ContentId);
-            Assert.Equal("{\"id\":\"m1\"}", parts[0].Body);
-            Assert.Equal(404, parts[1].StatusCode);
-            Assert.Equal(NotFoundJson, parts[1].Body);
+            Assert.AreEqual(2, parts.Count);
+            Assert.AreEqual(200, parts[0].StatusCode);
+            Assert.AreEqual("response-item0", parts[0].ContentId);
+            Assert.AreEqual("{\"id\":\"m1\"}", parts[0].Body);
+            Assert.AreEqual(404, parts[1].StatusCode);
+            Assert.AreEqual(NotFoundJson, parts[1].Body);
         }
 
-        [Fact]
+        [TestMethod]
         public void BatchResponseParser_沒有ContentID時依部件順序排列()
         {
             var body = new StringBuilder();
@@ -331,22 +332,22 @@ namespace Ozakboy.Gmail.Tests
 
             var parts = BatchResponseParser.Parse(body.ToString(), Boundary);
 
-            Assert.Equal(2, parts.Count);
-            Assert.Null(parts[0].ContentId);
-            Assert.Null(parts[1].ContentId);
-            Assert.Equal("{\"id\":\"first\"}", parts[0].Body);
-            Assert.Equal("{\"id\":\"second\"}", parts[1].Body);
+            Assert.AreEqual(2, parts.Count);
+            Assert.IsNull(parts[0].ContentId);
+            Assert.IsNull(parts[1].ContentId);
+            Assert.AreEqual("{\"id\":\"first\"}", parts[0].Body);
+            Assert.AreEqual("{\"id\":\"second\"}", parts[1].Body);
         }
 
-        [Fact]
+        [TestMethod]
         public void BatchResponseParser_主體或boundary為空_回傳空清單()
         {
-            Assert.Empty(BatchResponseParser.Parse(null, Boundary));
-            Assert.Empty(BatchResponseParser.Parse(string.Empty, Boundary));
-            Assert.Empty(BatchResponseParser.Parse("--x--", null));
+            Assert.IsEmpty(BatchResponseParser.Parse(null, Boundary));
+            Assert.IsEmpty(BatchResponseParser.Parse(string.Empty, Boundary));
+            Assert.IsEmpty(BatchResponseParser.Parse("--x--", null));
         }
 
-        [Fact]
+        [TestMethod]
         public async Task BatchGetMessagesAsync_ContentID錯序_仍依ContentID對回識別碼()
         {
             var handler = new RecordingHandler();
@@ -361,9 +362,9 @@ namespace Ozakboy.Gmail.Tests
 
             var result = await client.BatchGetMessagesAsync(new[] { "m1", "m2" });
 
-            Assert.Single(result.Messages);
-            Assert.Single(result.Failures);
-            Assert.Equal("m2", result.Failures[0].Id);
+            Assert.ContainsSingle(result.Messages);
+            Assert.ContainsSingle(result.Failures);
+            Assert.AreEqual("m2", result.Failures[0].Id);
         }
 
         /// <summary>組出一整份全部成功的 batch 回應主體。</summary>

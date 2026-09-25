@@ -1,7 +1,7 @@
 using System;
 using System.Linq;
 using System.Text;
-using Xunit;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Ozakboy.Gmail.Tests
 {
@@ -9,6 +9,7 @@ namespace Ozakboy.Gmail.Tests
     /// 組信器輸出的純文字層級檢查:換行、行長、encoded-word 長度、標頭順序、base64 行寬。
     /// 這些是 RFC 5322 / 2045 / 2047 的硬規則,不靠解析器而是直接看原文。
     /// </summary>
+    [TestClass]
     public class Rfc822WriterTests
     {
         private static string Render(GmailOutgoingMessage message)
@@ -38,7 +39,7 @@ namespace Ozakboy.Gmail.Tests
             return text.Substring(0, text.IndexOf("\r\n\r\n", StringComparison.Ordinal));
         }
 
-        [Fact]
+        [TestMethod]
         public void 全部以CRLF換行_沒有裸LF或裸CR()
         {
             var message = Basic();
@@ -52,7 +53,7 @@ namespace Ozakboy.Gmail.Tests
             Assert.DoesNotContain("\r", withoutCrLf, StringComparison.Ordinal);
         }
 
-        [Fact]
+        [TestMethod]
         public void base64行長不超過76()
         {
             var message = Basic();
@@ -60,14 +61,14 @@ namespace Ozakboy.Gmail.Tests
             message.Attachments.Add(new GmailAttachmentContent { FileName = "a.bin", Content = Enumerable.Range(0, 9000).Select(i => (byte)(i * 7)).ToArray() });
 
             foreach (var line in Lines(Render(message)))
-                Assert.True(line.Length <= 998, "行長超過 998:" + line.Length);
+                Assert.IsTrue(line.Length <= 998, "行長超過 998:" + line.Length);
 
             var bodyLines = Lines(Render(message)).Where(l => l.Length > 0 && !l.StartsWith("--", StringComparison.Ordinal) && l.IndexOf(':') < 0);
             foreach (var line in bodyLines)
-                Assert.True(line.Length <= 76, "base64 行長超過 76:" + line.Length);
+                Assert.IsTrue(line.Length <= 76, "base64 行長超過 76:" + line.Length);
         }
 
-        [Fact]
+        [TestMethod]
         public void 長中文主旨_每行不超過78且每個encoded_word不超過75()
         {
             var message = Basic();
@@ -77,18 +78,18 @@ namespace Ozakboy.Gmail.Tests
             var subjectLines = Lines(header).SkipWhile(l => !l.StartsWith("Subject:", StringComparison.Ordinal))
                 .TakeWhile((l, i) => i == 0 || l.StartsWith(" ", StringComparison.Ordinal)).ToList();
 
-            Assert.True(subjectLines.Count > 3, "長主旨應被折成多行");
+            Assert.IsTrue(subjectLines.Count > 3, "長主旨應被折成多行");
             foreach (var line in subjectLines)
             {
-                Assert.True(line.Length <= 78, "主旨行超過 78:" + line);
+                Assert.IsTrue(line.Length <= 78, "主旨行超過 78:" + line);
                 var word = line.Trim().Replace("Subject: ", string.Empty);
                 Assert.StartsWith("=?utf-8?B?", word, StringComparison.Ordinal);
                 Assert.EndsWith("?=", word, StringComparison.Ordinal);
-                Assert.True(word.Length <= 75, "encoded-word 超過 75:" + word.Length);
+                Assert.IsTrue(word.Length <= 75, "encoded-word 超過 75:" + word.Length);
             }
         }
 
-        [Fact]
+        [TestMethod]
         public void emoji主旨_encoded_word切割不會拆開代理對()
         {
             var message = Basic();
@@ -107,10 +108,10 @@ namespace Ozakboy.Gmail.Tests
                 decoded.Append(piece);
             }
 
-            Assert.Equal(message.Subject, decoded.ToString());
+            Assert.AreEqual(message.Subject, decoded.ToString());
         }
 
-        [Fact]
+        [TestMethod]
         public void 標頭順序_From_To_Cc_Bcc_ReplyTo_Subject_InReplyTo_References_額外_MIMEVersion_ContentType()
         {
             var message = Basic();
@@ -126,12 +127,12 @@ namespace Ozakboy.Gmail.Tests
                 .Select(l => l.Substring(0, l.IndexOf(':')))
                 .ToArray();
 
-            Assert.Equal(
+            CollectionAssert.AreEqual(
                 new[] { "From", "To", "Cc", "Bcc", "Reply-To", "Subject", "In-Reply-To", "References", "X-Sower-Digest", "MIME-Version", "Content-Type", "Content-Transfer-Encoding" },
                 names);
         }
 
-        [Fact]
+        [TestMethod]
         public void 不寫Date與MessageID()
         {
             var header = HeaderBlock(Render(Basic()));
@@ -140,7 +141,7 @@ namespace Ozakboy.Gmail.Tests
             Assert.DoesNotContain("Message-ID:", header, StringComparison.Ordinal);
         }
 
-        [Fact]
+        [TestMethod]
         public void 純ASCII主旨與顯示名_原樣寫出不編碼()
         {
             var text = Render(Basic());
@@ -150,7 +151,7 @@ namespace Ozakboy.Gmail.Tests
             Assert.Contains("To: to@example.com\r\n", text, StringComparison.Ordinal);
         }
 
-        [Fact]
+        [TestMethod]
         public void 內文一律base64與utf8()
         {
             var text = Render(Basic());
@@ -159,7 +160,7 @@ namespace Ozakboy.Gmail.Tests
             Assert.Contains(Convert.ToBase64String(Encoding.UTF8.GetBytes("plain body")), text, StringComparison.Ordinal);
         }
 
-        [Fact]
+        [TestMethod]
         public void 有附件時最外層是multipart_mixed且alternative在內層()
         {
             var message = Basic();
@@ -171,12 +172,12 @@ namespace Ozakboy.Gmail.Tests
             var alternativeIndex = text.IndexOf("Content-Type: multipart/alternative; boundary=\"", StringComparison.Ordinal);
             var attachmentIndex = text.IndexOf("Content-Disposition: attachment; filename=\"a.txt\"", StringComparison.Ordinal);
 
-            Assert.True(mixedIndex >= 0 && alternativeIndex > mixedIndex && attachmentIndex > alternativeIndex);
+            Assert.IsTrue(mixedIndex >= 0 && alternativeIndex > mixedIndex && attachmentIndex > alternativeIndex);
             Assert.Contains("Content-Type: text/plain; name=\"a.txt\"", text, StringComparison.Ordinal);
             Assert.EndsWith("--\r\n", text, StringComparison.Ordinal);
         }
 
-        [Fact]
+        [TestMethod]
         public void 中文檔名_以encoded_word寫進name與filename參數()
         {
             var message = Basic();
@@ -188,7 +189,7 @@ namespace Ozakboy.Gmail.Tests
             Assert.Contains("name=\"=?utf-8?B?", text, StringComparison.Ordinal);
         }
 
-        [Fact]
+        [TestMethod]
         public void 每次序列化_boundary都不同且mixed與alternative不共用()
         {
             var message = Basic();
@@ -199,9 +200,9 @@ namespace Ozakboy.Gmail.Tests
             var second = Render(message);
 
             var boundaries = first.Split(new[] { "boundary=\"" }, StringSplitOptions.None).Skip(1).Select(s => s.Substring(0, s.IndexOf('"'))).ToArray();
-            Assert.Equal(2, boundaries.Length);
-            Assert.NotEqual(boundaries[0], boundaries[1]);
-            Assert.NotEqual(first, second);
+            Assert.AreEqual(2, boundaries.Length);
+            Assert.AreNotEqual(boundaries[0], boundaries[1]);
+            Assert.AreNotEqual(first, second);
         }
     }
 }

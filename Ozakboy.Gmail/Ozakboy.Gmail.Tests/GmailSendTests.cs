@@ -2,13 +2,14 @@ using System;
 using System.Text;
 using System.Threading.Tasks;
 using Ozakboy.Gmail.Tests.TestSupport;
-using Xunit;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Ozakboy.Gmail.Tests
 {
     /// <summary>
     /// 寄信(messages.send 多段上傳)的組裝與回應解析測試:SendAsync 走內建組信器、SendRawAsync 走呼叫端 bytes。
     /// </summary>
+    [TestClass]
     public class GmailSendTests
     {
         private const string SendUrl = "https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/send?uploadType=multipart";
@@ -25,7 +26,7 @@ namespace Ozakboy.Gmail.Tests
             return message;
         }
 
-        [Fact]
+        [TestMethod]
         public async Task SendAsync_送到多段上傳端點()
         {
             var handler = new RecordingHandler();
@@ -34,12 +35,12 @@ namespace Ozakboy.Gmail.Tests
 
             await client.SendAsync(CreateMessage());
 
-            Assert.Equal("POST", handler.LastRequest.Method);
-            Assert.Equal(SendUrl, handler.LastRequest.Url);
+            Assert.AreEqual("POST", handler.LastRequest.Method);
+            Assert.AreEqual(SendUrl, handler.LastRequest.Url);
             Assert.Contains("multipart/related", handler.LastRequest.ContentType, StringComparison.OrdinalIgnoreCase);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task SendAsync_主體含rfc822段且內容等於ToRfc822Bytes()
         {
             var handler = new RecordingHandler();
@@ -61,7 +62,7 @@ namespace Ozakboy.Gmail.Tests
             Assert.Contains(headersOnly, body, StringComparison.Ordinal);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task SendAsync_未指定討論串_中繼資料為空物件()
         {
             var handler = new RecordingHandler();
@@ -74,7 +75,7 @@ namespace Ozakboy.Gmail.Tests
             Assert.DoesNotContain("threadId", handler.LastRequest.Body, StringComparison.Ordinal);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task SendAsync_指定討論串_中繼資料含threadId()
         {
             var handler = new RecordingHandler();
@@ -86,7 +87,7 @@ namespace Ozakboy.Gmail.Tests
             Assert.Contains("{\"threadId\":\"t42\"}", handler.LastRequest.Body, StringComparison.Ordinal);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task SendAsync_解析回應的識別碼與標籤()
         {
             var handler = new RecordingHandler();
@@ -95,12 +96,12 @@ namespace Ozakboy.Gmail.Tests
 
             var sent = await client.SendAsync(CreateMessage());
 
-            Assert.Equal("m1", sent.Id);
-            Assert.Equal("t1", sent.ThreadId);
-            Assert.Equal("SENT", Assert.Single(sent.LabelIds));
+            Assert.AreEqual("m1", sent.Id);
+            Assert.AreEqual("t1", sent.ThreadId);
+            Assert.AreEqual("SENT", Assert.ContainsSingle(sent.LabelIds));
         }
 
-        [Fact]
+        [TestMethod]
         public async Task SendAsync_重試時會重建同一份多段內容()
         {
             var handler = new RecordingHandler();
@@ -110,23 +111,23 @@ namespace Ozakboy.Gmail.Tests
 
             await client.SendAsync(CreateMessage());
 
-            Assert.Equal(2, handler.RequestCount);
+            Assert.AreEqual(2, handler.RequestCount);
             Assert.Contains("message/rfc822", handler.Requests[0].Body, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("message/rfc822", handler.Requests[1].Body, StringComparison.OrdinalIgnoreCase);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task SendAsync_沒有收件人_送出前就拋InvalidOperationException()
         {
             var handler = new RecordingHandler();
             var client = GmailTestFactory.CreateClient(handler);
             var message = new GmailOutgoingMessage { Subject = "沒人收" };
 
-            await Assert.ThrowsAsync<InvalidOperationException>(() => client.SendAsync(message));
-            Assert.Equal(0, handler.RequestCount);
+            await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => client.SendAsync(message));
+            Assert.AreEqual(0, handler.RequestCount);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task SendRawAsync_原封不動上傳呼叫端給的位元組()
         {
             const string Rfc822 = "From: sender@example.com\r\nTo: receiver@example.com\r\nSubject: raw\r\n\r\nhello";
@@ -136,11 +137,11 @@ namespace Ozakboy.Gmail.Tests
 
             var sent = await client.SendRawAsync(Encoding.UTF8.GetBytes(Rfc822), "t9");
 
-            Assert.Equal(SendUrl, handler.LastRequest.Url);
+            Assert.AreEqual(SendUrl, handler.LastRequest.Url);
             Assert.Contains("message/rfc822", handler.LastRequest.Body, StringComparison.OrdinalIgnoreCase);
             Assert.Contains(Rfc822, handler.LastRequest.Body, StringComparison.Ordinal);
             Assert.Contains("{\"threadId\":\"t9\"}", handler.LastRequest.Body, StringComparison.Ordinal);
-            Assert.Equal("m9", sent.Id);
+            Assert.AreEqual("m9", sent.Id);
         }
     }
 }

@@ -3,25 +3,48 @@
   <PropertyGroup>
     <!-- net48 吃的是主函式庫的 netstandard2.0 組建,用來驗證 ns2.0 條件編譯路徑在 .NET Framework 執行時期的行為 -->
     <TargetFrameworks>net10.0;net48</TargetFrameworks>
-    <LangVersion>latest</LangVersion>
     <AssemblyName>Ozakboy.Gmail.Tests</AssemblyName>
     <RootNamespace>Ozakboy.Gmail.Tests</RootNamespace>
-    <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
     <Nullable>disable</Nullable>
-    <!-- 測試專案放鬆 code style 強制（分析器標準只嚴格要求主函式庫） -->
-    <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>
-    <EnableNETAnalyzers>false</EnableNETAnalyzers>
+
+    <!--
+      改用 MSTest 內建的 Microsoft.Testing.Platform 執行器,不走舊的 VSTest。
+      理由是相依政策:VSTest 那條路徑(Microsoft.NET.Test.Sdk → Microsoft.TestPlatform.TestHost)會遞移帶進
+      Newtonsoft.Json —— 它掛在 Microsoft 的套件底下,但本身是第三方社群套件,
+      而本專案的判定標準是遞移相依而非套件名稱。搭配 repo 根目錄的 global.json(test.runner),
+      .NET 10 的 dotnet test 才會走 MTP;產 trx 用 MTP 的 report-trx 選項,不是 VSTest 的 logger 選項。
+      Uses MSTest's built-in Microsoft.Testing.Platform runner instead of the legacy VSTest path. This is a
+      dependency-policy decision: VSTest (Microsoft.NET.Test.Sdk → Microsoft.TestPlatform.TestHost) transitively
+      drags in Newtonsoft.Json, a third-party library sitting under a Microsoft package, and this project judges
+      by the transitive graph rather than by package name. The repo-level global.json (test.runner) is what
+      makes dotnet test on .NET 10 pick MTP up; trx output uses MTP's report-trx option rather than VSTest's logger.
+
+      net48 那一半只能在 Windows(CI 的 windows-latest)執行:Linux / macOS 上 dotnet test 會去找 mono 來跑 net48 的 exe,
+      找不到就整輪報錯。本機在非 Windows 跑測試請加 framework 選項指定 net10.0。
+      The net48 half only runs on Windows (CI uses windows-latest): on Linux / macOS, dotnet test looks for mono to
+      launch the net48 exe and fails the run when it is missing. Pass the framework option with net10.0 locally there.
+    -->
+    <EnableMSTestRunner>true</EnableMSTestRunner>
+    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+    <OutputType>Exe</OutputType>
   </PropertyGroup>
 
+  <!--
+    刻意不參照 MSTest 整合套件(它仍以 include="All" 帶著 Microsoft.NET.Test.Sdk),而是直接點名底下需要的部分。
+    覆蓋率由 Microsoft.Testing.Extensions.CodeCoverage 提供,trx 報告由 TrxReport 提供,兩者都不經過 VSTest。
+    MSTest 4.x 的 TestFramework 有 netstandard2.0 / net462 組建,net48 目標可以照跑。
+    Deliberately avoids the MSTest metapackage (it still carries Microsoft.NET.Test.Sdk with include="All") and
+    names the pieces it needs instead. Coverage comes from Microsoft.Testing.Extensions.CodeCoverage and trx
+    reports from TrxReport, neither through VSTest. MSTest 4.x ships netstandard2.0 / net462 builds, so the
+    net48 target keeps working.
+  -->
   <ItemGroup>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
-    <PackageReference Include="xunit" Version="2.9.3" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-      <PrivateAssets>all</PrivateAssets>
-    </PackageReference>
-    <PackageReference Include="Microsoft.Extensions.Configuration" Version="8.0.0" />
+    <PackageReference Include="MSTest.TestAdapter" Version="4.4.1" />
+    <PackageReference Include="MSTest.TestFramework" Version="4.4.1" />
+    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.11.2" />
+    <PackageReference Include="Microsoft.Testing.Extensions.TrxReport" Version="2.4.1" />
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.0.12" />
     <!-- 只用來解析組信器輸出做反向驗證;主函式庫本身不依賴 MimeKit -->
     <PackageReference Include="MimeKit" Version="4.17.0" />
   </ItemGroup>

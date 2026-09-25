@@ -3,18 +3,19 @@ using System.IO;
 using System.Text;
 using System.Threading.Tasks;
 using Ozakboy.Gmail.Tests.TestSupport;
-using Xunit;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Ozakboy.Gmail.Tests
 {
     /// <summary>
     /// GmailClient 各方法的請求組裝與回應解析測試。全部離線,靠 RecordingHandler 假造回應。
     /// </summary>
+    [TestClass]
     public class GmailClientTests
     {
         private const string BaseUrl = "https://gmail.googleapis.com/gmail/v1/users/me/";
 
-        [Fact]
+        [TestMethod]
         public async Task GetProfileAsync_送出GET與正確網址並掛上Bearer()
         {
             var handler = new RecordingHandler();
@@ -23,16 +24,16 @@ namespace Ozakboy.Gmail.Tests
 
             var profile = await client.GetProfileAsync();
 
-            Assert.Equal("GET", handler.LastRequest.Method);
-            Assert.Equal(BaseUrl + "profile", handler.LastRequest.Url);
-            Assert.Equal("Bearer " + GmailTestFactory.AccessToken, handler.LastRequest.Authorization);
-            Assert.Equal("user@example.com", profile.EmailAddress);
-            Assert.Equal(1200, profile.MessagesTotal);
-            Assert.Equal(900, profile.ThreadsTotal);
-            Assert.Equal("123456", profile.HistoryId);
+            Assert.AreEqual("GET", handler.LastRequest.Method);
+            Assert.AreEqual(BaseUrl + "profile", handler.LastRequest.Url);
+            Assert.AreEqual("Bearer " + GmailTestFactory.AccessToken, handler.LastRequest.Authorization);
+            Assert.AreEqual("user@example.com", profile.EmailAddress);
+            Assert.AreEqual(1200, profile.MessagesTotal);
+            Assert.AreEqual(900, profile.ThreadsTotal);
+            Assert.AreEqual("123456", profile.HistoryId);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task ListMessagesAsync_有查詢與標籤_組出正確查詢字串()
         {
             var handler = new RecordingHandler();
@@ -41,12 +42,12 @@ namespace Ozakboy.Gmail.Tests
 
             await client.ListMessagesAsync("newer_than:30d", new[] { "INBOX", "UNREAD" }, 25, "PAGE-2", true);
 
-            Assert.Equal(
+            Assert.AreEqual(
                 BaseUrl + "messages?q=newer_than%3A30d&labelIds=INBOX&labelIds=UNREAD&maxResults=25&pageToken=PAGE-2&includeSpamTrash=true",
                 handler.LastRequest.Url);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task ListMessagesAsync_全部參數為預設_不送任何查詢參數()
         {
             var handler = new RecordingHandler();
@@ -55,10 +56,10 @@ namespace Ozakboy.Gmail.Tests
 
             await client.ListMessagesAsync();
 
-            Assert.Equal(BaseUrl + "messages", handler.LastRequest.Url);
+            Assert.AreEqual(BaseUrl + "messages", handler.LastRequest.Url);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task ListMessagesAsync_空標籤序列_不送labelIds()
         {
             var handler = new RecordingHandler();
@@ -67,10 +68,10 @@ namespace Ozakboy.Gmail.Tests
 
             await client.ListMessagesAsync(labelIds: Array.Empty<string>());
 
-            Assert.Equal(BaseUrl + "messages", handler.LastRequest.Url);
+            Assert.AreEqual(BaseUrl + "messages", handler.LastRequest.Url);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task ListMessagesAsync_回應解析出郵件參考與分頁資訊()
         {
             var handler = new RecordingHandler();
@@ -79,14 +80,14 @@ namespace Ozakboy.Gmail.Tests
 
             var list = await client.ListMessagesAsync();
 
-            Assert.Equal(2, list.Messages.Count);
-            Assert.Equal("m1", list.Messages[0].Id);
-            Assert.Equal("t2", list.Messages[1].ThreadId);
-            Assert.Equal("NEXT", list.NextPageToken);
-            Assert.Equal(42, list.ResultSizeEstimate);
+            Assert.AreEqual(2, list.Messages.Count);
+            Assert.AreEqual("m1", list.Messages[0].Id);
+            Assert.AreEqual("t2", list.Messages[1].ThreadId);
+            Assert.AreEqual("NEXT", list.NextPageToken);
+            Assert.AreEqual(42, list.ResultSizeEstimate);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task ListMessagesAsync_回應沒有messages_清單為空而非null()
         {
             var handler = new RecordingHandler();
@@ -95,11 +96,11 @@ namespace Ozakboy.Gmail.Tests
 
             var list = await client.ListMessagesAsync();
 
-            Assert.NotNull(list.Messages);
-            Assert.Empty(list.Messages);
+            Assert.IsNotNull(list.Messages);
+            Assert.IsEmpty(list.Messages);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task GetMessageAsync_預設格式為full()
         {
             var handler = new RecordingHandler();
@@ -108,10 +109,10 @@ namespace Ozakboy.Gmail.Tests
 
             await client.GetMessageAsync("m1");
 
-            Assert.Equal(BaseUrl + "messages/m1?format=full", handler.LastRequest.Url);
+            Assert.AreEqual(BaseUrl + "messages/m1?format=full", handler.LastRequest.Url);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task GetMessageAsync_Metadata格式_送出重複的metadataHeaders()
         {
             var handler = new RecordingHandler();
@@ -120,12 +121,12 @@ namespace Ozakboy.Gmail.Tests
 
             await client.GetMessageAsync("m1", GmailMessageFormat.Metadata, new[] { "From", "Subject", "Date" });
 
-            Assert.Equal(
+            Assert.AreEqual(
                 BaseUrl + "messages/m1?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date",
                 handler.LastRequest.Url);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task GetMessageAsync_非Metadata格式_不送metadataHeaders()
         {
             var handler = new RecordingHandler();
@@ -134,10 +135,10 @@ namespace Ozakboy.Gmail.Tests
 
             await client.GetMessageAsync("m1", GmailMessageFormat.Minimal, new[] { "From" });
 
-            Assert.Equal(BaseUrl + "messages/m1?format=minimal", handler.LastRequest.Url);
+            Assert.AreEqual(BaseUrl + "messages/m1?format=minimal", handler.LastRequest.Url);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task GetMessageAsync_識別碼會被轉義()
         {
             var handler = new RecordingHandler();
@@ -146,10 +147,10 @@ namespace Ozakboy.Gmail.Tests
 
             await client.GetMessageAsync("a b");
 
-            Assert.Equal(BaseUrl + "messages/a%20b?format=full", handler.LastRequest.Url);
+            Assert.AreEqual(BaseUrl + "messages/a%20b?format=full", handler.LastRequest.Url);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task GetMessageAsync_解析出payload與標頭()
         {
             var handler = new RecordingHandler();
@@ -163,17 +164,17 @@ namespace Ozakboy.Gmail.Tests
 
             var message = await client.GetMessageAsync("m1");
 
-            Assert.Equal("m1", message.Id);
-            Assert.Equal(new[] { "INBOX", "UNREAD" }, message.LabelIds);
-            Assert.Equal("98765", message.HistoryId);
-            Assert.Equal(1725000000000L, message.InternalDate);
-            Assert.Equal(2048, message.SizeEstimate);
-            Assert.Equal("text/plain", message.Payload.MimeType);
-            Assert.Equal("sender@example.com", message.GetHeader("from"));
-            Assert.Equal(12, message.Payload.Body.Size);
+            Assert.AreEqual("m1", message.Id);
+            CollectionAssert.AreEqual(new[] { "INBOX", "UNREAD" }, message.LabelIds);
+            Assert.AreEqual("98765", message.HistoryId);
+            Assert.AreEqual(1725000000000L, message.InternalDate);
+            Assert.AreEqual(2048, message.SizeEstimate);
+            Assert.AreEqual("text/plain", message.Payload.MimeType);
+            Assert.AreEqual("sender@example.com", message.GetHeader("from"));
+            Assert.AreEqual(12, message.Payload.Body.Size);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task GetMessageRawAsync_以raw格式取回並解碼成RFC822位元組()
         {
             const string Rfc822 = "From: sender@example.com\r\nTo: receiver@example.com\r\nSubject: 測試主旨\r\n\r\n內文";
@@ -185,11 +186,11 @@ namespace Ozakboy.Gmail.Tests
 
             var bytes = await client.GetMessageRawAsync("m1");
 
-            Assert.Equal(BaseUrl + "messages/m1?format=raw", handler.LastRequest.Url);
-            Assert.Equal(Rfc822, Encoding.UTF8.GetString(bytes));
+            Assert.AreEqual(BaseUrl + "messages/m1?format=raw", handler.LastRequest.Url);
+            Assert.AreEqual(Rfc822, Encoding.UTF8.GetString(bytes));
         }
 
-        [Fact]
+        [TestMethod]
         public async Task GetMessageRawAsync_回應缺raw欄位_回空陣列()
         {
             var handler = new RecordingHandler();
@@ -198,10 +199,10 @@ namespace Ozakboy.Gmail.Tests
 
             var bytes = await client.GetMessageRawAsync("m1");
 
-            Assert.Empty(bytes);
+            Assert.IsEmpty(bytes);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task ListHistoryAsync_組出重複的historyTypes與其他參數()
         {
             var handler = new RecordingHandler();
@@ -215,12 +216,12 @@ namespace Ozakboy.Gmail.Tests
                 "INBOX",
                 100);
 
-            Assert.Equal(
+            Assert.AreEqual(
                 BaseUrl + "history?startHistoryId=12345&historyTypes=messageAdded&historyTypes=labelRemoved&pageToken=PAGE-9&labelId=INBOX&maxResults=100",
                 handler.LastRequest.Url);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task ListHistoryAsync_解析變更紀錄()
         {
             var handler = new RecordingHandler();
@@ -231,15 +232,15 @@ namespace Ozakboy.Gmail.Tests
 
             var history = await client.ListHistoryAsync("100");
 
-            var record = Assert.Single(history.History);
-            Assert.Equal("777", record.Id);
-            Assert.Equal("m9", Assert.Single(record.MessagesAdded).Message.Id);
-            Assert.Equal("UNREAD", Assert.Single(Assert.Single(record.LabelsRemoved).LabelIds));
-            Assert.Empty(record.MessagesDeleted);
-            Assert.Equal("888", history.HistoryId);
+            var record = Assert.ContainsSingle(history.History);
+            Assert.AreEqual("777", record.Id);
+            Assert.AreEqual("m9", Assert.ContainsSingle(record.MessagesAdded).Message.Id);
+            Assert.AreEqual("UNREAD", Assert.ContainsSingle(Assert.ContainsSingle(record.LabelsRemoved).LabelIds));
+            Assert.IsEmpty(record.MessagesDeleted);
+            Assert.AreEqual("888", history.HistoryId);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task ModifyLabelsAsync_送出POST與兩個標籤清單()
         {
             var handler = new RecordingHandler();
@@ -248,14 +249,14 @@ namespace Ozakboy.Gmail.Tests
 
             var message = await client.ModifyLabelsAsync("m1", new[] { "STARRED" }, new[] { "UNREAD" });
 
-            Assert.Equal("POST", handler.LastRequest.Method);
-            Assert.Equal(BaseUrl + "messages/m1/modify", handler.LastRequest.Url);
-            Assert.Equal("{\"addLabelIds\":[\"STARRED\"],\"removeLabelIds\":[\"UNREAD\"]}", handler.LastRequest.Body);
+            Assert.AreEqual("POST", handler.LastRequest.Method);
+            Assert.AreEqual(BaseUrl + "messages/m1/modify", handler.LastRequest.Url);
+            Assert.AreEqual("{\"addLabelIds\":[\"STARRED\"],\"removeLabelIds\":[\"UNREAD\"]}", handler.LastRequest.Body);
             Assert.Contains("application/json", handler.LastRequest.ContentType, StringComparison.OrdinalIgnoreCase);
-            Assert.Equal("STARRED", Assert.Single(message.LabelIds));
+            Assert.AreEqual("STARRED", Assert.ContainsSingle(message.LabelIds));
         }
 
-        [Fact]
+        [TestMethod]
         public async Task ModifyLabelsAsync_只給移除清單_body不含addLabelIds()
         {
             var handler = new RecordingHandler();
@@ -264,10 +265,10 @@ namespace Ozakboy.Gmail.Tests
 
             await client.ModifyLabelsAsync("m1", null, new[] { "UNREAD" });
 
-            Assert.Equal("{\"removeLabelIds\":[\"UNREAD\"]}", handler.LastRequest.Body);
+            Assert.AreEqual("{\"removeLabelIds\":[\"UNREAD\"]}", handler.LastRequest.Body);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task BatchModifyLabelsAsync_送出批次主體且不解析回應()
         {
             var handler = new RecordingHandler();
@@ -276,12 +277,12 @@ namespace Ozakboy.Gmail.Tests
 
             await client.BatchModifyLabelsAsync(new[] { "m1", "m2" }, new[] { "SPAM" }, null);
 
-            Assert.Equal("POST", handler.LastRequest.Method);
-            Assert.Equal(BaseUrl + "messages/batchModify", handler.LastRequest.Url);
-            Assert.Equal("{\"ids\":[\"m1\",\"m2\"],\"addLabelIds\":[\"SPAM\"]}", handler.LastRequest.Body);
+            Assert.AreEqual("POST", handler.LastRequest.Method);
+            Assert.AreEqual(BaseUrl + "messages/batchModify", handler.LastRequest.Url);
+            Assert.AreEqual("{\"ids\":[\"m1\",\"m2\"],\"addLabelIds\":[\"SPAM\"]}", handler.LastRequest.Body);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task BatchModifyLabelsAsync_識別碼為空_不送任何請求()
         {
             var handler = new RecordingHandler();
@@ -289,10 +290,10 @@ namespace Ozakboy.Gmail.Tests
 
             await client.BatchModifyLabelsAsync(Array.Empty<string>(), new[] { "SPAM" }, null);
 
-            Assert.Equal(0, handler.RequestCount);
+            Assert.AreEqual(0, handler.RequestCount);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task TrashAsync_送出trash端點()
         {
             var handler = new RecordingHandler();
@@ -301,12 +302,12 @@ namespace Ozakboy.Gmail.Tests
 
             var message = await client.TrashAsync("m1");
 
-            Assert.Equal("POST", handler.LastRequest.Method);
-            Assert.Equal(BaseUrl + "messages/m1/trash", handler.LastRequest.Url);
-            Assert.Equal("TRASH", Assert.Single(message.LabelIds));
+            Assert.AreEqual("POST", handler.LastRequest.Method);
+            Assert.AreEqual(BaseUrl + "messages/m1/trash", handler.LastRequest.Url);
+            Assert.AreEqual("TRASH", Assert.ContainsSingle(message.LabelIds));
         }
 
-        [Fact]
+        [TestMethod]
         public async Task UntrashAsync_送出untrash端點()
         {
             var handler = new RecordingHandler();
@@ -315,11 +316,11 @@ namespace Ozakboy.Gmail.Tests
 
             await client.UntrashAsync("m1");
 
-            Assert.Equal("POST", handler.LastRequest.Method);
-            Assert.Equal(BaseUrl + "messages/m1/untrash", handler.LastRequest.Url);
+            Assert.AreEqual("POST", handler.LastRequest.Method);
+            Assert.AreEqual(BaseUrl + "messages/m1/untrash", handler.LastRequest.Url);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task ReportSpamAsync_加上SPAM並移除INBOX()
         {
             var handler = new RecordingHandler();
@@ -328,11 +329,11 @@ namespace Ozakboy.Gmail.Tests
 
             await client.ReportSpamAsync("m1");
 
-            Assert.Equal(BaseUrl + "messages/m1/modify", handler.LastRequest.Url);
-            Assert.Equal("{\"addLabelIds\":[\"SPAM\"],\"removeLabelIds\":[\"INBOX\"]}", handler.LastRequest.Body);
+            Assert.AreEqual(BaseUrl + "messages/m1/modify", handler.LastRequest.Url);
+            Assert.AreEqual("{\"addLabelIds\":[\"SPAM\"],\"removeLabelIds\":[\"INBOX\"]}", handler.LastRequest.Body);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task ListLabelsAsync_解析labels陣列()
         {
             var handler = new RecordingHandler();
@@ -343,15 +344,15 @@ namespace Ozakboy.Gmail.Tests
 
             var labels = await client.ListLabelsAsync();
 
-            Assert.Equal("GET", handler.LastRequest.Method);
-            Assert.Equal(BaseUrl + "labels", handler.LastRequest.Url);
-            Assert.Equal(2, labels.Count);
-            Assert.Equal("Sower/Ads", labels[1].Name);
-            Assert.Equal(5, labels[1].MessagesTotal);
-            Assert.Equal("#ffffff", labels[1].Color.BackgroundColor);
+            Assert.AreEqual("GET", handler.LastRequest.Method);
+            Assert.AreEqual(BaseUrl + "labels", handler.LastRequest.Url);
+            Assert.AreEqual(2, labels.Count);
+            Assert.AreEqual("Sower/Ads", labels[1].Name);
+            Assert.AreEqual(5, labels[1].MessagesTotal);
+            Assert.AreEqual("#ffffff", labels[1].Color.BackgroundColor);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task ListLabelsAsync_回應沒有labels_回空清單()
         {
             var handler = new RecordingHandler();
@@ -360,11 +361,11 @@ namespace Ozakboy.Gmail.Tests
 
             var labels = await client.ListLabelsAsync();
 
-            Assert.NotNull(labels);
-            Assert.Empty(labels);
+            Assert.IsNotNull(labels);
+            Assert.IsEmpty(labels);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task CreateLabelAsync_送出名稱顯示方式與顏色()
         {
             var handler = new RecordingHandler();
@@ -381,15 +382,15 @@ namespace Ozakboy.Gmail.Tests
 
             var label = await client.CreateLabelAsync("Sower", options);
 
-            Assert.Equal("POST", handler.LastRequest.Method);
-            Assert.Equal(BaseUrl + "labels", handler.LastRequest.Url);
-            Assert.Equal(
+            Assert.AreEqual("POST", handler.LastRequest.Method);
+            Assert.AreEqual(BaseUrl + "labels", handler.LastRequest.Url);
+            Assert.AreEqual(
                 "{\"name\":\"Sower\",\"labelListVisibility\":\"labelShow\",\"messageListVisibility\":\"show\",\"color\":{\"backgroundColor\":\"#ffffff\",\"textColor\":\"#000000\"}}",
                 handler.LastRequest.Body);
-            Assert.Equal("Label_2", label.Id);
+            Assert.AreEqual("Label_2", label.Id);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task CreateLabelAsync_未給選項_主體只含名稱()
         {
             var handler = new RecordingHandler();
@@ -398,10 +399,10 @@ namespace Ozakboy.Gmail.Tests
 
             await client.CreateLabelAsync("Sower/Ads");
 
-            Assert.Equal("{\"name\":\"Sower/Ads\"}", handler.LastRequest.Body);
+            Assert.AreEqual("{\"name\":\"Sower/Ads\"}", handler.LastRequest.Body);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task UpdateLabelAsync_使用PATCH並帶新名稱()
         {
             var handler = new RecordingHandler();
@@ -410,12 +411,12 @@ namespace Ozakboy.Gmail.Tests
 
             await client.UpdateLabelAsync("Label_2", "Sower/Renamed");
 
-            Assert.Equal("PATCH", handler.LastRequest.Method);
-            Assert.Equal(BaseUrl + "labels/Label_2", handler.LastRequest.Url);
-            Assert.Equal("{\"name\":\"Sower/Renamed\"}", handler.LastRequest.Body);
+            Assert.AreEqual("PATCH", handler.LastRequest.Method);
+            Assert.AreEqual(BaseUrl + "labels/Label_2", handler.LastRequest.Url);
+            Assert.AreEqual("{\"name\":\"Sower/Renamed\"}", handler.LastRequest.Body);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task UpdateLabelAsync_名稱為null_主體不含name()
         {
             var handler = new RecordingHandler();
@@ -424,10 +425,10 @@ namespace Ozakboy.Gmail.Tests
 
             await client.UpdateLabelAsync("Label_2", null, new GmailLabelOptions { LabelListVisibility = "labelHide" });
 
-            Assert.Equal("{\"labelListVisibility\":\"labelHide\"}", handler.LastRequest.Body);
+            Assert.AreEqual("{\"labelListVisibility\":\"labelHide\"}", handler.LastRequest.Body);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task DeleteLabelAsync_使用DELETE且接受204()
         {
             var handler = new RecordingHandler();
@@ -436,11 +437,11 @@ namespace Ozakboy.Gmail.Tests
 
             await client.DeleteLabelAsync("Label_2");
 
-            Assert.Equal("DELETE", handler.LastRequest.Method);
-            Assert.Equal(BaseUrl + "labels/Label_2", handler.LastRequest.Url);
+            Assert.AreEqual("DELETE", handler.LastRequest.Method);
+            Assert.AreEqual(BaseUrl + "labels/Label_2", handler.LastRequest.Url);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task GetAttachmentAsync_解碼base64url內容()
         {
             var handler = new RecordingHandler();
@@ -449,13 +450,13 @@ namespace Ozakboy.Gmail.Tests
 
             var attachment = await client.GetAttachmentAsync("m1", "a1");
 
-            Assert.Equal(BaseUrl + "messages/m1/attachments/a1", handler.LastRequest.Url);
-            Assert.Equal("a1", attachment.AttachmentId);
-            Assert.Equal(5, attachment.Size);
-            Assert.Equal("hello", Encoding.UTF8.GetString(attachment.Data));
+            Assert.AreEqual(BaseUrl + "messages/m1/attachments/a1", handler.LastRequest.Url);
+            Assert.AreEqual("a1", attachment.AttachmentId);
+            Assert.AreEqual(5, attachment.Size);
+            Assert.AreEqual("hello", Encoding.UTF8.GetString(attachment.Data));
         }
 
-        [Fact]
+        [TestMethod]
         public async Task GetAttachmentAsync_沒有data_回空陣列()
         {
             var handler = new RecordingHandler();
@@ -464,11 +465,11 @@ namespace Ozakboy.Gmail.Tests
 
             var attachment = await client.GetAttachmentAsync("m1", "a1");
 
-            Assert.NotNull(attachment.Data);
-            Assert.Empty(attachment.Data);
+            Assert.IsNotNull(attachment.Data);
+            Assert.IsEmpty(attachment.Data);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task DownloadAttachmentAsync_寫入串流並回傳位元組數且不關閉串流()
         {
             var handler = new RecordingHandler();
@@ -478,12 +479,12 @@ namespace Ozakboy.Gmail.Tests
             using var destination = new MemoryStream();
             var written = await client.DownloadAttachmentAsync("m1", "a1", destination);
 
-            Assert.Equal(5, written);
-            Assert.Equal("hello", Encoding.UTF8.GetString(destination.ToArray()));
-            Assert.True(destination.CanWrite);
+            Assert.AreEqual(5, written);
+            Assert.AreEqual("hello", Encoding.UTF8.GetString(destination.ToArray()));
+            Assert.IsTrue(destination.CanWrite);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task 自訂UserId會出現在網址且被轉義()
         {
             var handler = new RecordingHandler();
@@ -492,10 +493,10 @@ namespace Ozakboy.Gmail.Tests
 
             await client.GetProfileAsync();
 
-            Assert.Equal("https://gmail.googleapis.com/gmail/v1/users/user%40example.com/profile", handler.LastRequest.Url);
+            Assert.AreEqual("https://gmail.googleapis.com/gmail/v1/users/user%40example.com/profile", handler.LastRequest.Url);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task 建構後再改options不影響已建立的用戶端()
         {
             var handler = new RecordingHandler();
@@ -506,7 +507,7 @@ namespace Ozakboy.Gmail.Tests
             options.UserId = "someone@example.com";
             await client.GetProfileAsync();
 
-            Assert.Equal(BaseUrl + "profile", handler.LastRequest.Url);
+            Assert.AreEqual(BaseUrl + "profile", handler.LastRequest.Url);
         }
     }
 }

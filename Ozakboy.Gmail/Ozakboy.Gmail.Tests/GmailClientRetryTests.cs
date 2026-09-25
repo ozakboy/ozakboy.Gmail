@@ -5,13 +5,14 @@ using System.Threading;
 using System.Threading.Tasks;
 using Ozakboy.Gmail.Core;
 using Ozakboy.Gmail.Tests.TestSupport;
-using Xunit;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Ozakboy.Gmail.Tests
 {
     /// <summary>
     /// 重試策略與錯誤映射的測試。重試延遲一律設為零,測試不會真的等待。
     /// </summary>
+    [TestClass]
     public class GmailClientRetryTests
     {
         private const string RateLimitBody =
@@ -20,7 +21,7 @@ namespace Ozakboy.Gmail.Tests
         private const string NotFoundBody =
             "{\"error\":{\"code\":404,\"message\":\"Requested entity was not found.\",\"errors\":[{\"reason\":\"notFound\",\"message\":\"Not Found\"}]}}";
 
-        [Fact]
+        [TestMethod]
         public async Task 收到429後重試_第二次成功()
         {
             var handler = new RecordingHandler();
@@ -30,39 +31,39 @@ namespace Ozakboy.Gmail.Tests
 
             var profile = await client.GetProfileAsync();
 
-            Assert.Equal(2, handler.RequestCount);
-            Assert.Equal("user@example.com", profile.EmailAddress);
+            Assert.AreEqual(2, handler.RequestCount);
+            Assert.AreEqual("user@example.com", profile.EmailAddress);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task 收到500持續失敗_重試用盡後拋例外且嘗試次數為MaxRetries加一()
         {
             var handler = new RecordingHandler();
             handler.EnqueueError(HttpStatusCode.InternalServerError, "{\"error\":{\"code\":500,\"message\":\"Backend Error\"}}");
             var client = GmailTestFactory.CreateClient(handler, GmailTestFactory.NoDelayOptions(maxRetries: 2));
 
-            var exception = await Assert.ThrowsAsync<GmailApiException>(() => client.GetProfileAsync());
+            var exception = await Assert.ThrowsExactlyAsync<GmailApiException>(() => client.GetProfileAsync());
 
-            Assert.Equal(3, handler.RequestCount);
-            Assert.Equal(500, exception.StatusCode);
-            Assert.False(exception.IsRateLimited);
+            Assert.AreEqual(3, handler.RequestCount);
+            Assert.AreEqual(500, exception.StatusCode);
+            Assert.IsFalse(exception.IsRateLimited);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task 收到403rateLimitExceeded_會重試且旗標為限流()
         {
             var handler = new RecordingHandler();
             handler.EnqueueError(HttpStatusCode.Forbidden, RateLimitBody);
             var client = GmailTestFactory.CreateClient(handler, GmailTestFactory.NoDelayOptions(maxRetries: 1));
 
-            var exception = await Assert.ThrowsAsync<GmailApiException>(() => client.GetProfileAsync());
+            var exception = await Assert.ThrowsExactlyAsync<GmailApiException>(() => client.GetProfileAsync());
 
-            Assert.Equal(2, handler.RequestCount);
-            Assert.True(exception.IsRateLimited);
-            Assert.Equal("rateLimitExceeded", exception.Reason);
+            Assert.AreEqual(2, handler.RequestCount);
+            Assert.IsTrue(exception.IsRateLimited);
+            Assert.AreEqual("rateLimitExceeded", exception.Reason);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task 收到403其他原因_不重試也不算限流()
         {
             var handler = new RecordingHandler();
@@ -71,14 +72,14 @@ namespace Ozakboy.Gmail.Tests
                 "{\"error\":{\"code\":403,\"message\":\"Insufficient Permission\",\"errors\":[{\"reason\":\"insufficientPermissions\"}]}}");
             var client = GmailTestFactory.CreateClient(handler);
 
-            var exception = await Assert.ThrowsAsync<GmailApiException>(() => client.GetProfileAsync());
+            var exception = await Assert.ThrowsExactlyAsync<GmailApiException>(() => client.GetProfileAsync());
 
-            Assert.Equal(1, handler.RequestCount);
-            Assert.False(exception.IsRateLimited);
-            Assert.Equal("insufficientPermissions", exception.Reason);
+            Assert.AreEqual(1, handler.RequestCount);
+            Assert.IsFalse(exception.IsRateLimited);
+            Assert.AreEqual("insufficientPermissions", exception.Reason);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task 收到401_不重試且IsUnauthorized為真()
         {
             var handler = new RecordingHandler();
@@ -87,42 +88,42 @@ namespace Ozakboy.Gmail.Tests
                 "{\"error\":{\"code\":401,\"message\":\"Invalid Credentials\",\"errors\":[{\"reason\":\"authError\"}]}}");
             var client = GmailTestFactory.CreateClient(handler);
 
-            var exception = await Assert.ThrowsAsync<GmailApiException>(() => client.GetProfileAsync());
+            var exception = await Assert.ThrowsExactlyAsync<GmailApiException>(() => client.GetProfileAsync());
 
-            Assert.Equal(1, handler.RequestCount);
-            Assert.True(exception.IsUnauthorized);
-            Assert.False(exception.IsNotFound);
+            Assert.AreEqual(1, handler.RequestCount);
+            Assert.IsTrue(exception.IsUnauthorized);
+            Assert.IsFalse(exception.IsNotFound);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task 一般404_IsNotFound為真且不是歷程過期()
         {
             var handler = new RecordingHandler();
             handler.EnqueueError(HttpStatusCode.NotFound, NotFoundBody);
             var client = GmailTestFactory.CreateClient(handler);
 
-            var exception = await Assert.ThrowsAsync<GmailApiException>(() => client.GetMessageAsync("m1"));
+            var exception = await Assert.ThrowsExactlyAsync<GmailApiException>(() => client.GetMessageAsync("m1"));
 
-            Assert.True(exception.IsNotFound);
-            Assert.False(exception.IsHistoryExpired);
-            Assert.Equal("notFound", exception.Reason);
-            Assert.Equal("Requested entity was not found.", exception.ErrorMessage);
+            Assert.IsTrue(exception.IsNotFound);
+            Assert.IsFalse(exception.IsHistoryExpired);
+            Assert.AreEqual("notFound", exception.Reason);
+            Assert.AreEqual("Requested entity was not found.", exception.ErrorMessage);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task 歷程查詢404_IsHistoryExpired為真且IsNotFound為假()
         {
             var handler = new RecordingHandler();
             handler.EnqueueError(HttpStatusCode.NotFound, NotFoundBody);
             var client = GmailTestFactory.CreateClient(handler);
 
-            var exception = await Assert.ThrowsAsync<GmailApiException>(() => client.ListHistoryAsync("12345"));
+            var exception = await Assert.ThrowsExactlyAsync<GmailApiException>(() => client.ListHistoryAsync("12345"));
 
-            Assert.True(exception.IsHistoryExpired);
-            Assert.False(exception.IsNotFound);
+            Assert.IsTrue(exception.IsHistoryExpired);
+            Assert.IsFalse(exception.IsNotFound);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task RetryAfter秒數會取代計算出的延遲()
         {
             var handler = new RecordingHandler();
@@ -135,10 +136,10 @@ namespace Ozakboy.Gmail.Tests
 
             await client.GetProfileAsync();
 
-            Assert.Equal(2, handler.RequestCount);
+            Assert.AreEqual(2, handler.RequestCount);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task RetryAfter日期格式會被採用()
         {
             var handler = new RecordingHandler();
@@ -150,22 +151,22 @@ namespace Ozakboy.Gmail.Tests
 
             await client.GetProfileAsync();
 
-            Assert.Equal(2, handler.RequestCount);
+            Assert.AreEqual(2, handler.RequestCount);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task MaxRetries為零_完全不重試()
         {
             var handler = new RecordingHandler();
             handler.EnqueueError(HttpStatusCode.InternalServerError, "{}");
             var client = GmailTestFactory.CreateClient(handler, GmailTestFactory.NoDelayOptions(maxRetries: 0));
 
-            await Assert.ThrowsAsync<GmailApiException>(() => client.GetProfileAsync());
+            await Assert.ThrowsExactlyAsync<GmailApiException>(() => client.GetProfileAsync());
 
-            Assert.Equal(1, handler.RequestCount);
+            Assert.AreEqual(1, handler.RequestCount);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task 等待重試期間被取消_拋出OperationCanceledException()
         {
             using var cancellation = new CancellationTokenSource();
@@ -174,31 +175,31 @@ namespace Ozakboy.Gmail.Tests
             handler.EnqueueError((HttpStatusCode)429   /* net48 沒有 TooManyRequests 列舉值 */, "{}");
             var client = GmailTestFactory.CreateClient(handler);
 
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => client.GetProfileAsync(cancellation.Token));
+            await Assert.ThrowsAsync<OperationCanceledException>(() => client.GetProfileAsync(cancellation.Token));
         }
 
-        [Fact]
+        [TestMethod]
         public async Task 存取權杖提供者回傳空字串_拋出InvalidOperationException()
         {
             var handler = new RecordingHandler();
             handler.EnqueueJson("{}");
             var client = GmailTestFactory.CreateClient(handler, accessTokenProvider: _ => Task.FromResult(string.Empty));
 
-            await Assert.ThrowsAsync<InvalidOperationException>(() => client.GetProfileAsync());
-            Assert.Equal(0, handler.RequestCount);
+            await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => client.GetProfileAsync());
+            Assert.AreEqual(0, handler.RequestCount);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task 存取權杖提供者回傳null_拋出InvalidOperationException()
         {
             var handler = new RecordingHandler();
             handler.EnqueueJson("{}");
             var client = GmailTestFactory.CreateClient(handler, accessTokenProvider: _ => Task.FromResult<string>(null));
 
-            await Assert.ThrowsAsync<InvalidOperationException>(() => client.GetProfileAsync());
+            await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => client.GetProfileAsync());
         }
 
-        [Fact]
+        [TestMethod]
         public async Task 重試時不會再次呼叫存取權杖提供者()
         {
             var calls = 0;
@@ -215,121 +216,124 @@ namespace Ozakboy.Gmail.Tests
 
             await client.GetProfileAsync();
 
-            Assert.Equal(1, calls);
-            Assert.Equal(3, handler.RequestCount);
-            Assert.All(handler.Requests, request => Assert.Equal("Bearer token-1", request.Authorization));
+            Assert.AreEqual(1, calls);
+            Assert.AreEqual(3, handler.RequestCount);
+            foreach (var request in handler.Requests)
+            {
+                Assert.AreEqual("Bearer token-1", request.Authorization);
+            }
         }
 
-        [Fact]
+        [TestMethod]
         public async Task 例外訊息含方法路徑狀態碼與原因()
         {
             var handler = new RecordingHandler();
             handler.EnqueueError(HttpStatusCode.NotFound, NotFoundBody);
             var client = GmailTestFactory.CreateClient(handler);
 
-            var exception = await Assert.ThrowsAsync<GmailApiException>(() => client.GetMessageAsync("m1"));
+            var exception = await Assert.ThrowsExactlyAsync<GmailApiException>(() => client.GetMessageAsync("m1"));
 
-            Assert.Equal(
+            Assert.AreEqual(
                 "Gmail API GET /gmail/v1/users/me/messages/m1?format=full failed with 404 (notFound): Requested entity was not found.",
                 exception.Message);
-            Assert.Equal("GET", exception.RequestMethod);
-            Assert.Equal("/gmail/v1/users/me/messages/m1?format=full", exception.RequestPath);
-            Assert.Equal(NotFoundBody, exception.ResponseBody);
+            Assert.AreEqual("GET", exception.RequestMethod);
+            Assert.AreEqual("/gmail/v1/users/me/messages/m1?format=full", exception.RequestPath);
+            Assert.AreEqual(NotFoundBody, exception.ResponseBody);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task 錯誤主體不是JSON_原因與描述為null但仍保留原文()
         {
             var handler = new RecordingHandler();
             handler.EnqueueError(HttpStatusCode.BadGateway, "<html>502</html>");
             var client = GmailTestFactory.CreateClient(handler, GmailTestFactory.NoDelayOptions(maxRetries: 0));
 
-            var exception = await Assert.ThrowsAsync<GmailApiException>(() => client.GetProfileAsync());
+            var exception = await Assert.ThrowsExactlyAsync<GmailApiException>(() => client.GetProfileAsync());
 
-            Assert.Null(exception.Reason);
-            Assert.Null(exception.ErrorMessage);
-            Assert.Equal("<html>502</html>", exception.ResponseBody);
+            Assert.IsNull(exception.Reason);
+            Assert.IsNull(exception.ErrorMessage);
+            Assert.AreEqual("<html>502</html>", exception.ResponseBody);
             Assert.Contains("(-): -", exception.Message, StringComparison.Ordinal);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task 網路層例外不會被包裝也不重試()
         {
             var handler = new RecordingHandler { ThrowOnSend = new HttpRequestException("DNS 失敗") };
             var client = GmailTestFactory.CreateClient(handler);
 
-            await Assert.ThrowsAsync<HttpRequestException>(() => client.GetProfileAsync());
-            Assert.Equal(1, handler.RequestCount);
+            await Assert.ThrowsExactlyAsync<HttpRequestException>(() => client.GetProfileAsync());
+            Assert.AreEqual(1, handler.RequestCount);
         }
 
-        [Theory]
-        [InlineData(429, null, true)]
-        [InlineData(500, null, true)]
-        [InlineData(503, null, true)]
-        [InlineData(403, "rateLimitExceeded", true)]
-        [InlineData(403, "userRateLimitExceeded", true)]
-        [InlineData(403, "insufficientPermissions", false)]
-        [InlineData(401, null, false)]
-        [InlineData(400, null, false)]
-        [InlineData(404, null, false)]
-        [InlineData(409, null, false)]
+        [TestMethod]
+        [DataRow(429, null, true)]
+        [DataRow(500, null, true)]
+        [DataRow(503, null, true)]
+        [DataRow(403, "rateLimitExceeded", true)]
+        [DataRow(403, "userRateLimitExceeded", true)]
+        [DataRow(403, "insufficientPermissions", false)]
+        [DataRow(401, null, false)]
+        [DataRow(400, null, false)]
+        [DataRow(404, null, false)]
+        [DataRow(409, null, false)]
         public void RetryPolicy_判斷可重試的狀態碼與原因(int statusCode, string reason, bool expected)
         {
-            Assert.Equal(expected, RetryPolicy.IsRetryable(statusCode, reason));
+            Assert.AreEqual(expected, RetryPolicy.IsRetryable(statusCode, reason));
         }
 
-        [Fact]
+        [TestMethod]
         public void RetryPolicy_延遲以基準時間加倍成長()
         {
             var policy = new RetryPolicy(3, TimeSpan.FromSeconds(1));
 
-            Assert.Equal(TimeSpan.FromSeconds(1), policy.GetDelay(1, null));
-            Assert.Equal(TimeSpan.FromSeconds(2), policy.GetDelay(2, null));
-            Assert.Equal(TimeSpan.FromSeconds(4), policy.GetDelay(3, null));
+            Assert.AreEqual(TimeSpan.FromSeconds(1), policy.GetDelay(1, null));
+            Assert.AreEqual(TimeSpan.FromSeconds(2), policy.GetDelay(2, null));
+            Assert.AreEqual(TimeSpan.FromSeconds(4), policy.GetDelay(3, null));
         }
 
-        [Fact]
+        [TestMethod]
         public void RetryPolicy_有RetryAfter時直接採用且負值視為零()
         {
             var policy = new RetryPolicy(3, TimeSpan.FromSeconds(1));
 
-            Assert.Equal(TimeSpan.FromSeconds(30), policy.GetDelay(3, TimeSpan.FromSeconds(30)));
-            Assert.Equal(TimeSpan.Zero, policy.GetDelay(1, TimeSpan.FromSeconds(-5)));
+            Assert.AreEqual(TimeSpan.FromSeconds(30), policy.GetDelay(3, TimeSpan.FromSeconds(30)));
+            Assert.AreEqual(TimeSpan.Zero, policy.GetDelay(1, TimeSpan.FromSeconds(-5)));
         }
 
-        [Fact]
+        [TestMethod]
         public async Task 失敗回應帶RetryAfter_例外帶回該值()
         {
             var handler = new RecordingHandler();
             handler.EnqueueError((HttpStatusCode)429   /* net48 沒有 TooManyRequests 列舉值 */, "{}", retryAfterSeconds: "5");
             var client = GmailTestFactory.CreateClient(handler, GmailTestFactory.NoDelayOptions(maxRetries: 0));
 
-            var exception = await Assert.ThrowsAsync<GmailApiException>(() => client.GetProfileAsync());
+            var exception = await Assert.ThrowsExactlyAsync<GmailApiException>(() => client.GetProfileAsync());
 
-            Assert.Equal(TimeSpan.FromSeconds(5), exception.RetryAfter);
+            Assert.AreEqual(TimeSpan.FromSeconds(5), exception.RetryAfter);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task 失敗回應沒有RetryAfter_例外的RetryAfter為null()
         {
             var handler = new RecordingHandler();
             handler.EnqueueError(HttpStatusCode.NotFound, NotFoundBody);
             var client = GmailTestFactory.CreateClient(handler);
 
-            var exception = await Assert.ThrowsAsync<GmailApiException>(() => client.GetMessageAsync("m1"));
+            var exception = await Assert.ThrowsExactlyAsync<GmailApiException>(() => client.GetMessageAsync("m1"));
 
-            Assert.Null(exception.RetryAfter);
+            Assert.IsNull(exception.RetryAfter);
         }
 
-        [Fact]
+        [TestMethod]
         public void GmailApiException_公開建構子的RetryAfter為null()
         {
-            Assert.Null(new GmailApiException().RetryAfter);
-            Assert.Null(new GmailApiException("訊息").RetryAfter);
-            Assert.Null(new GmailApiException("訊息", new InvalidOperationException()).RetryAfter);
+            Assert.IsNull(new GmailApiException().RetryAfter);
+            Assert.IsNull(new GmailApiException("訊息").RetryAfter);
+            Assert.IsNull(new GmailApiException("訊息", new InvalidOperationException()).RetryAfter);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task RetryAfter超過MaxRetryDelay_立即拋出不等待也不重試()
         {
             var handler = new RecordingHandler();
@@ -344,13 +348,13 @@ namespace Ozakboy.Gmail.Tests
             };
             var client = GmailTestFactory.CreateClient(handler, options);
 
-            var exception = await Assert.ThrowsAsync<GmailApiException>(() => client.GetProfileAsync());
+            var exception = await Assert.ThrowsExactlyAsync<GmailApiException>(() => client.GetProfileAsync());
 
-            Assert.Equal(1, handler.RequestCount);
-            Assert.Equal(TimeSpan.FromSeconds(120), exception.RetryAfter);
+            Assert.AreEqual(1, handler.RequestCount);
+            Assert.AreEqual(TimeSpan.FromSeconds(120), exception.RetryAfter);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task 指數退避超過MaxRetryDelay_立即拋出不重試()
         {
             var handler = new RecordingHandler();
@@ -364,13 +368,13 @@ namespace Ozakboy.Gmail.Tests
             };
             var client = GmailTestFactory.CreateClient(handler, options);
 
-            var exception = await Assert.ThrowsAsync<GmailApiException>(() => client.GetProfileAsync());
+            var exception = await Assert.ThrowsExactlyAsync<GmailApiException>(() => client.GetProfileAsync());
 
-            Assert.Equal(1, handler.RequestCount);
-            Assert.Null(exception.RetryAfter);
+            Assert.AreEqual(1, handler.RequestCount);
+            Assert.IsNull(exception.RetryAfter);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task MaxRetryDelay為null_不設上限仍照常重試()
         {
             var handler = new RecordingHandler();
@@ -387,28 +391,28 @@ namespace Ozakboy.Gmail.Tests
 
             await client.GetProfileAsync();
 
-            Assert.Equal(2, handler.RequestCount);
+            Assert.AreEqual(2, handler.RequestCount);
         }
 
-        [Fact]
+        [TestMethod]
         public void RetryPolicy_MaxRetryDelay為null_任何延遲都不算超過上限()
         {
             var policy = new RetryPolicy(3, TimeSpan.FromSeconds(1), null);
 
-            Assert.False(policy.ExceedsMaxDelay(TimeSpan.FromHours(1)));
-            Assert.False(policy.ExceedsMaxDelay(TimeSpan.MaxValue));
+            Assert.IsFalse(policy.ExceedsMaxDelay(TimeSpan.FromHours(1)));
+            Assert.IsFalse(policy.ExceedsMaxDelay(TimeSpan.MaxValue));
         }
 
-        [Fact]
+        [TestMethod]
         public void RetryPolicy_延遲剛好等於上限不算超過_超過才算()
         {
             var policy = new RetryPolicy(3, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(10));
 
-            Assert.False(policy.ExceedsMaxDelay(TimeSpan.FromSeconds(10)));
-            Assert.True(policy.ExceedsMaxDelay(TimeSpan.FromSeconds(11)));
+            Assert.IsFalse(policy.ExceedsMaxDelay(TimeSpan.FromSeconds(10)));
+            Assert.IsTrue(policy.ExceedsMaxDelay(TimeSpan.FromSeconds(11)));
         }
 
-        [Fact]
+        [TestMethod]
         public async Task RetryOnNetworkErrors為false_網路層例外立即上拋只送一次()
         {
             var handler = new RecordingHandler { ThrowOnSend = new HttpRequestException("DNS 失敗") };
@@ -420,11 +424,11 @@ namespace Ozakboy.Gmail.Tests
             };
             var client = GmailTestFactory.CreateClient(handler, options);
 
-            await Assert.ThrowsAsync<HttpRequestException>(() => client.GetProfileAsync());
-            Assert.Equal(1, handler.RequestCount);
+            await Assert.ThrowsExactlyAsync<HttpRequestException>(() => client.GetProfileAsync());
+            Assert.AreEqual(1, handler.RequestCount);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task RetryOnNetworkErrors為true_第一次網路失敗第二次成功()
         {
             var handler = new RecordingHandler
@@ -444,11 +448,11 @@ namespace Ozakboy.Gmail.Tests
 
             var profile = await client.GetProfileAsync();
 
-            Assert.Equal(2, handler.RequestCount);
-            Assert.Equal("user@example.com", profile.EmailAddress);
+            Assert.AreEqual(2, handler.RequestCount);
+            Assert.AreEqual("user@example.com", profile.EmailAddress);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task RetryOnNetworkErrors為true_重試用盡後拋出的仍是HttpRequestException()
         {
             var handler = new RecordingHandler { ThrowOnSend = new HttpRequestException("DNS 失敗") };
@@ -460,13 +464,13 @@ namespace Ozakboy.Gmail.Tests
             };
             var client = GmailTestFactory.CreateClient(handler, options);
 
-            var exception = await Assert.ThrowsAsync<HttpRequestException>(() => client.GetProfileAsync());
+            var exception = await Assert.ThrowsExactlyAsync<HttpRequestException>(() => client.GetProfileAsync());
 
-            Assert.Equal(3, handler.RequestCount);
-            Assert.Equal("DNS 失敗", exception.Message);
+            Assert.AreEqual(3, handler.RequestCount);
+            Assert.AreEqual("DNS 失敗", exception.Message);
         }
 
-        [Fact]
+        [TestMethod]
         public async Task RetryOnNetworkErrors為true_取消仍然不重試()
         {
             using var cancellation = new CancellationTokenSource();
@@ -482,8 +486,8 @@ namespace Ozakboy.Gmail.Tests
             };
             var client = GmailTestFactory.CreateClient(handler, options);
 
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => client.GetProfileAsync(cancellation.Token));
-            Assert.Equal(1, handler.RequestCount);
+            await Assert.ThrowsAsync<OperationCanceledException>(() => client.GetProfileAsync(cancellation.Token));
+            Assert.AreEqual(1, handler.RequestCount);
         }
     }
 }
